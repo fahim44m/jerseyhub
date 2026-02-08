@@ -9,7 +9,7 @@ import {
   getFirestore, 
   collection, 
   addDoc, 
-  deleteDoc, 
+  deleteDoc,
   doc, 
   onSnapshot, 
   serverTimestamp, 
@@ -21,17 +21,13 @@ import {
   Search, 
   X, 
   Image as ImageIcon, 
-  Share2, 
   Loader2, 
   Maximize2,
-  Link as LinkIcon
+  Lock,
+  Trash2
 } from 'lucide-react';
 
-// --- গুরুত্বপূর্ণ নির্দেশ ---
-// আপনি যদি আপনার নিজের Firebase ব্যবহার করতে চান, তবে নিচের firebaseConfig অবজেক্টে 
-// আপনার Firebase Console থেকে পাওয়া তথ্যগুলো বসিয়ে দিন। 
-// যেহেতু আপনি লোকাল পিসিতে চালাচ্ছেন, তাই __firebase_config কাজ করবে না।
-
+// Firebase Configuration
 const firebaseConfig = {
   apiKey: "AIzaSyDakYvo1uIfyWyl_incZvu3Dn4Ho11eWQg",
   authDomain: "jerseyhub-419ea.firebaseapp.com",
@@ -41,15 +37,14 @@ const firebaseConfig = {
   appId: "1:973074107883:web:08db5e64dd7b438c0e9dae",
 };
 
-// অ্যাপ ইনিশিয়ালাইজেশন
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = 'jersey-hub-local';
 
-// --- ছবি ছোট করার হেল্পার ---
+// Image Compression Helper
 const compressImage = (file) => {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => {
@@ -70,6 +65,11 @@ const compressImage = (file) => {
 };
 
 export default function App() {
+  // State Management
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passError, setPassError] = useState(false);
+  
   const [user, setUser] = useState(null);
   const [designs, setDesigns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -84,6 +84,9 @@ export default function App() {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [fileToUpload, setFileToUpload] = useState(null);
 
+  const SITE_PASSWORD = '866535';
+
+  // Auth Effect
   useEffect(() => {
     const login = async () => {
       try {
@@ -96,8 +99,9 @@ export default function App() {
     return onAuthStateChanged(auth, setUser);
   }, []);
 
+  // Firestore Data Fetching
   useEffect(() => {
-    if (!user) return;
+    if (!user || !isAuthenticated) return;
     const q = query(collection(db, 'designs'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -109,8 +113,35 @@ export default function App() {
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, isAuthenticated]);
 
+  // Password Verification
+  const handlePasswordSubmit = (e) => {
+    e.preventDefault();
+    if (passwordInput === SITE_PASSWORD) {
+      setIsAuthenticated(true);
+      setPassError(false);
+    } else {
+      setPassError(true);
+      setPasswordInput('');
+    }
+  };
+
+  // Delete Logic
+  const handleDelete = async (e, designId) => {
+    e.stopPropagation(); // Card ক্লিক হওয়া আটকানোর জন্য
+    const confirmDelete = window.confirm("আপনি কি নিশ্চিত যে এই ডিজাইনটি ডিলিট করতে চান?");
+    if (confirmDelete) {
+      try {
+        await deleteDoc(doc(db, 'designs', designId));
+      } catch (err) {
+        console.error("Delete Error:", err);
+        alert("ডিলিট করা সম্ভব হয়নি।");
+      }
+    }
+  };
+
+  // Upload Logic
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
     if (file && file.type.startsWith('image/')) {
@@ -138,7 +169,7 @@ export default function App() {
       setSourceLink('');
       setIsModalOpen(false);
     } catch (err) {
-      alert("সেভ করা যায়নি। ফায়ারবেস কনফিগ চেক করুন।");
+      alert("সিস্টেম এরর: আপলোড সফল হয়নি।");
     } finally {
       setUploading(false);
     }
@@ -156,6 +187,45 @@ export default function App() {
     );
   }, [designs, searchQuery]);
 
+  // --- Password Protection View ---
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md text-center">
+          <div className="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Lock className="text-teal-600" size={30} />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-800 mb-2">সুরক্ষিত এলাকা</h1>
+          <p className="text-slate-500 mb-8">এই ওয়েবসাইটটি দেখার জন্য সঠিক পাসওয়ার্ড লিখুন।</p>
+          
+          <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            <div>
+              <input 
+                type="password"
+                autoFocus
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                placeholder="পাসওয়ার্ড দিন..."
+                className={`w-full p-4 text-center text-xl tracking-[0.5em] border rounded-xl focus:ring-2 focus:outline-none ${
+                  passError ? 'border-red-500 focus:ring-red-500 animate-shake' : 'border-slate-200 focus:ring-teal-500'
+                }`}
+              />
+              {passError && <p className="text-red-500 text-sm mt-2">ভুল পাসওয়ার্ড, আবার চেষ্টা করুন।</p>}
+            </div>
+            <button 
+              type="submit"
+              className="w-full bg-teal-600 text-white py-4 rounded-xl font-bold hover:bg-teal-700 transition-all active:scale-95"
+            >
+              প্রবেশ করুন
+            </button>
+          </form>
+          <p className="mt-8 text-slate-400 text-xs">© জার্সি হাব - অল রাইটস রিজার্ভড</p>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Main Application View ---
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-slate-50">
@@ -197,7 +267,7 @@ export default function App() {
       <main className="max-w-7xl mx-auto p-4 md:p-8">
         {filteredDesigns.length === 0 ? (
           <div className="text-center py-20 bg-white rounded-2xl border-2 border-dashed border-slate-200">
-            <p className="text-slate-400">কোনো ডিজাইন পাওয়া যায়নি। নতুন কিছু আপলোড করুন!</p>
+            <p className="text-slate-400">কোনো ডিজাইন পাওয়া যায়নি। নতুন কিছু আপলোড করুন!</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -205,15 +275,32 @@ export default function App() {
               <div key={design.id} className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden group">
                 <div className="relative aspect-square overflow-hidden cursor-pointer" onClick={() => setSelectedImage(design)}>
                   <img src={design.imageData} alt={design.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                  <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                    <Maximize2 className="text-white" size={32} />
+                  
+                  {/* Action Overlay */}
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-4 transition-opacity">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setSelectedImage(design); }}
+                      className="bg-white p-2 rounded-full text-slate-900 hover:text-teal-600 transition-colors"
+                      title="বিউ করুন"
+                    >
+                      <Maximize2 size={20} />
+                    </button>
+                    {/* Delete Button (Visible only to uploader or as admin) */}
+                    <button 
+                      onClick={(e) => handleDelete(e, design.id)}
+                      className="bg-red-500 p-2 rounded-full text-white hover:bg-red-600 transition-colors"
+                      title="ডিলিট করুন"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
+
+                  <div className="absolute top-2 right-2">
+                     <span className="text-[10px] bg-white/90 text-teal-600 px-2 py-0.5 rounded shadow-sm font-bold">{design.tag}</span>
                   </div>
                 </div>
                 <div className="p-4">
-                  <div className="flex justify-between items-start mb-4">
-                    <h3 className="font-bold truncate pr-2">{design.title}</h3>
-                    <span className="text-[10px] bg-teal-50 text-teal-600 px-2 py-0.5 rounded border border-teal-100">{design.tag}</span>
-                  </div>
+                  <h3 className="font-bold truncate mb-3">{design.title}</h3>
                   <button 
                     onClick={() => openLink(design.sourceLink)}
                     className="w-full bg-slate-900 text-white py-2 rounded-lg text-sm font-medium hover:bg-teal-600 transition-colors flex items-center justify-center gap-2"
@@ -227,7 +314,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Modal & Fullscreen Viewer remained logic same as previous working state */}
+      {/* Modal View */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-200">
@@ -238,7 +325,7 @@ export default function App() {
             <div className="p-6 space-y-4">
               <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-teal-400 transition-colors relative">
                 <input type="file" accept="image/*" onChange={handleFileSelect} className="absolute inset-0 opacity-0 cursor-pointer" />
-                {previewUrl ? <img src={previewUrl} className="h-32 mx-auto rounded" /> : <div className="py-4 text-slate-400">স্ক্রিনশট সিলেক্ট করুন</div>}
+                {previewUrl ? <img src={previewUrl} className="h-32 mx-auto rounded" alt="Preview" /> : <div className="py-4 text-slate-400">স্ক্রিনশট সিলেক্ট করুন</div>}
               </div>
               <input 
                 type="text" placeholder="জার্সির নাম..." 
@@ -274,11 +361,15 @@ export default function App() {
         </div>
       )}
 
+      {/* Image Previewer */}
       {selectedImage && (
         <div className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-4" onClick={() => setSelectedImage(null)}>
-          <img src={selectedImage.imageData} className="max-w-full max-h-[80vh] rounded shadow-2xl" />
+          <img src={selectedImage.imageData} className="max-w-full max-h-[80vh] rounded shadow-2xl" alt="Full" />
           <h2 className="text-white mt-4 text-xl font-bold">{selectedImage.title}</h2>
-          <button onClick={() => openLink(selectedImage.sourceLink)} className="mt-4 bg-teal-500 text-white px-8 py-2 rounded-full font-bold hover:bg-teal-400">ডাউনলোড করুন</button>
+          <div className="flex gap-4">
+            <button onClick={(e) => { e.stopPropagation(); openLink(selectedImage.sourceLink); }} className="mt-4 bg-teal-500 text-white px-8 py-2 rounded-full font-bold hover:bg-teal-400">ডাউনলোড করুন</button>
+            <button onClick={(e) => { e.stopPropagation(); handleDelete(e, selectedImage.id); setSelectedImage(null); }} className="mt-4 bg-red-500 text-white px-8 py-2 rounded-full font-bold hover:bg-red-600">ডিলিট করুন</button>
+          </div>
         </div>
       )}
     </div>
