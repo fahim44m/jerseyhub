@@ -50,7 +50,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// --- Image Compression Helper ---
 const compressImage = (file) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -72,7 +71,6 @@ const compressImage = (file) => {
   });
 };
 
-// --- Skeleton Loader Component ---
 const SkeletonCard = () => (
   <div className="break-inside-avoid bg-white rounded-[2rem] border border-slate-100 overflow-hidden mb-6">
     <div className="w-full h-64 bg-slate-200 animate-pulse" />
@@ -88,6 +86,7 @@ export default function App() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [passError, setPassError] = useState(false);
+  const [pendingSourceLink, setPendingSourceLink] = useState(null);
   
   const [user, setUser] = useState(null);
   const [designs, setDesigns] = useState([]);
@@ -101,7 +100,6 @@ export default function App() {
   const [showRequestsModal, setShowRequestsModal] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   
-  // Upload State
   const [newDesignTitle, setNewDesignTitle] = useState('');
   const [newDesignTag, setNewDesignTag] = useState('Sublimation');
   const [sourceLink, setSourceLink] = useState('');
@@ -144,7 +142,6 @@ export default function App() {
     return () => { unsubDesigns(); unsubRequests(); };
   }, [user]);
 
-  // Handlers
   const handlePasswordSubmit = (e) => {
     e.preventDefault();
     if (passwordInput === SITE_PASSWORD) {
@@ -152,8 +149,22 @@ export default function App() {
       setPassError(false);
       setShowLoginModal(false);
       setPasswordInput('');
+      
+      if (pendingSourceLink) {
+        window.open(pendingSourceLink, '_blank');
+        setPendingSourceLink(null);
+      }
     } else {
       setPassError(true);
+    }
+  };
+
+  const handleSourceClick = (link) => {
+    if (isAuthenticated) {
+      window.open(link, '_blank');
+    } else {
+      setPendingSourceLink(link);
+      setShowLoginModal(true);
     }
   };
 
@@ -185,8 +196,8 @@ export default function App() {
         reason: reason,
         createdAt: serverTimestamp()
       });
-      alert("ডিলিট রিকোয়েস্ট পাঠানো হয়েছে।");
-    } catch (err) { alert("ব্যর্থ হয়েছে।"); }
+      alert("ডিলিট রিকোয়েস্ট পাঠানো হয়েছে।");
+    } catch (err) { alert("ব্যর্থ হয়েছে।"); }
   };
 
   const approveDelete = async (requestId, designId) => {
@@ -201,7 +212,6 @@ export default function App() {
     await deleteDoc(doc(db, 'deleteRequests', requestId));
   };
 
-  // Upload Logic
   const handleFile = (file) => {
     if (file && file.type.startsWith('image/')) {
       setFileToUpload(file);
@@ -267,7 +277,7 @@ export default function App() {
           </div>
           <div className="hidden sm:block">
             <h1 className="text-xl font-black tracking-tight">JERSEY HUB</h1>
-            <p className="text-[10px] font-bold text-teal-600 tracking-[0.2em] uppercase text-center md:text-left">Design Studio</p>
+            <p className="text-[10px] font-bold text-teal-600 tracking-[0.2em] uppercase">Design Studio</p>
           </div>
         </div>
 
@@ -309,8 +319,7 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Hero / Tabs */}
-      <div className="max-w-7xl mx-auto px-4 pt-8">
+      <div className="max-w-7xl mx-auto px-4 pt-8 pb-20">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
           <div>
             <h2 className="text-3xl font-black text-slate-800">Gallery</h2>
@@ -331,7 +340,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Gallery Content */}
         {loading ? (
           <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-6 space-y-6">
             {[1,2,3,4,5,6,7,8].map(i => <SkeletonCard key={i} />)}
@@ -360,7 +368,6 @@ export default function App() {
                 <div className="p-5 flex items-center justify-between gap-4">
                   <h3 className="font-bold text-slate-800 truncate text-sm">{design.title}</h3>
                   <div className="flex gap-1">
-                     {/* --- ডিলিট বাটন এখন শুধুমাত্র অ্যাডমিনদের জন্য --- */}
                      {isAuthenticated && (
                         <button onClick={(e) => { e.stopPropagation(); requestDelete(e, design); }} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all">
                            <Trash2 size={16} />
@@ -481,22 +488,30 @@ export default function App() {
         </div>
       )}
 
-      {/* Login Modal */}
+      {/* Login Modal (Password Box) */}
       {showLoginModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setShowLoginModal(false)} />
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => { setShowLoginModal(false); setPendingSourceLink(null); }} />
           <div className="relative bg-white rounded-[2.5rem] p-10 w-full max-w-sm text-center shadow-2xl animate-in zoom-in-95">
             <div className="w-16 h-16 bg-teal-50 text-teal-600 rounded-2xl flex items-center justify-center mx-auto mb-6"><ShieldCheck size={32} /></div>
             <h2 className="text-2xl font-black text-slate-800 mb-2">Admin Access</h2>
+            <p className="text-slate-400 text-xs font-bold mb-6 uppercase tracking-wider">Please enter code to continue</p>
             <form onSubmit={handlePasswordSubmit} className="space-y-4">
-              <input type="password" placeholder="••••••" autoFocus className={`w-full py-4 text-center text-3xl font-black tracking-[0.3em] border-2 rounded-2xl focus:outline-none transition-all ${passError ? 'border-red-500 bg-red-50 text-red-600' : 'border-slate-100 bg-slate-50 focus:border-teal-500'}`} value={passwordInput} onChange={e => setPasswordInput(e.target.value)} />
+              <input 
+                type="password" 
+                placeholder="••••••" 
+                autoFocus 
+                className={`w-full py-4 text-center text-3xl font-black tracking-[0.3em] border-2 rounded-2xl focus:outline-none transition-all ${passError ? 'border-red-500 bg-red-50 text-red-600' : 'border-slate-100 bg-slate-50 focus:border-teal-500'}`} 
+                value={passwordInput} 
+                onChange={e => setPasswordInput(e.target.value)} 
+              />
               <button type="submit" className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95">Verify</button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Selected Image View */}
+      {/* Selected Image View (Preview) */}
       {selectedImage && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
            <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl animate-in fade-in" onClick={() => setSelectedImage(null)} />
@@ -504,16 +519,19 @@ export default function App() {
            <div className="relative w-full max-w-6xl h-full flex flex-col items-center justify-center gap-8 pointer-events-none">
               <img src={selectedImage.imageData} className="max-w-full max-h-[75vh] object-contain rounded-3xl shadow-2xl pointer-events-auto ring-1 ring-white/10 animate-in zoom-in-90" alt="Preview" />
               <div className="bg-white rounded-[2rem] p-6 w-full max-w-md pointer-events-auto flex items-center justify-between shadow-2xl animate-in slide-in-from-bottom-10">
-                 <div>
+                  <div>
                     <h2 className="text-xl font-black text-slate-800 leading-tight">{selectedImage.title}</h2>
                     <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">{selectedImage.tag}</p>
-                 </div>
-                 <div className="flex gap-3">
+                  </div>
+                  <div className="flex gap-3">
                     <button onClick={(e) => downloadImageOnly(e, selectedImage.imageData, selectedImage.title)} className="p-3 bg-slate-100 hover:bg-slate-200 rounded-2xl text-slate-700 transition-all"><Download size={20} /></button>
-                    <button onClick={() => { if(isAuthenticated) window.open(selectedImage.sourceLink, '_blank'); else setShowLoginModal(true); }} className="bg-slate-900 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all">
+                    <button 
+                      onClick={() => handleSourceClick(selectedImage.sourceLink)} 
+                      className="bg-slate-900 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-slate-800 transition-all shadow-lg"
+                    >
                        {isAuthenticated ? <Unlock size={16} /> : <Lock size={16} />} Source
                     </button>
-                 </div>
+                  </div>
               </div>
            </div>
         </div>
