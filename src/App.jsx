@@ -18,7 +18,6 @@ import {
 } from 'firebase/firestore';
 import { 
   Upload, 
-  Download, 
   Search, 
   X, 
   Image as ImageIcon, 
@@ -29,10 +28,13 @@ import {
   Trash2,
   LogIn,
   LogOut,
-  Save
+  Download,
+  ShieldCheck,
+  Palette
 } from 'lucide-react';
 
-// Firebase Configuration
+// --- Firebase Configuration ---
+// Note: In a production app, use environment variables for these values.
 const firebaseConfig = {
   apiKey: "AIzaSyDakYvo1uIfyWyl_incZvu3Dn4Ho11eWQg",
   authDomain: "jerseyhub-419ea.firebaseapp.com",
@@ -47,7 +49,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Image Compression Helper
+// --- Image Compression Helper ---
 const compressImage = (file) => {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -57,22 +59,22 @@ const compressImage = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 800; 
+        const MAX_WIDTH = 1000; // Increased slightly for better quality on larger screens
         const scaleSize = MAX_WIDTH / img.width;
         canvas.width = MAX_WIDTH;
         canvas.height = img.height * scaleSize;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
       };
     };
   });
 };
 
 export default function App() {
-  // State Management
-  const [isAuthenticated, setIsAuthenticated] = useState(false); // Admin auth state
-  const [showLoginModal, setShowLoginModal] = useState(false); // Toggle Login Popup
+  // --- State Management ---
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [passError, setPassError] = useState(false);
   
@@ -81,6 +83,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('All'); // For simple filtering
+  
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   
@@ -92,7 +96,7 @@ export default function App() {
 
   const SITE_PASSWORD = '866535';
 
-  // Auth Effect (Anonymous login for database reading)
+  // --- Effects ---
   useEffect(() => {
     const login = async () => {
       try {
@@ -105,12 +109,12 @@ export default function App() {
     return onAuthStateChanged(auth, setUser);
   }, []);
 
-  // Firestore Data Fetching
   useEffect(() => {
-    if (!user) return; // Wait for anonymous auth
+    if (!user) return;
     const q = query(collection(db, 'designs'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Sort internally by timestamp
       items.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       setDesigns(items);
       setLoading(false);
@@ -121,13 +125,13 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  // Password Verification Logic
+  // --- Handlers ---
   const handlePasswordSubmit = (e) => {
     e.preventDefault();
     if (passwordInput === SITE_PASSWORD) {
       setIsAuthenticated(true);
       setPassError(false);
-      setShowLoginModal(false); // Close modal on success
+      setShowLoginModal(false);
       setPasswordInput('');
     } else {
       setPassError(true);
@@ -137,15 +141,14 @@ export default function App() {
 
   const handleLogout = () => {
     setIsAuthenticated(false);
+    // Optional: signOut(auth) if you want to completely kill the session
   };
 
-  // Delete Logic (Admin Only)
   const handleDelete = async (e, designId) => {
     e.stopPropagation();
     if (!isAuthenticated) return;
     
-    const confirmDelete = window.confirm("আপনি কি নিশ্চিত যে এই ডিজাইনটি ডিলিট করতে চান?");
-    if (confirmDelete) {
+    if (window.confirm("আপনি কি নিশ্চিত যে এই ডিজাইনটি ডিলিট করতে চান?")) {
       try {
         await deleteDoc(doc(db, 'designs', designId));
         if (selectedImage?.id === designId) setSelectedImage(null);
@@ -156,7 +159,6 @@ export default function App() {
     }
   };
 
-  // Upload Logic (Admin Only)
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
     if (file && file.type.startsWith('image/')) {
@@ -178,6 +180,7 @@ export default function App() {
         uploaderId: user.uid,
         createdAt: serverTimestamp(),
       });
+      // Reset Form
       setFileToUpload(null);
       setPreviewUrl(null);
       setNewDesignTitle('');
@@ -190,7 +193,6 @@ export default function App() {
     }
   };
 
-  // Helper: Open Source Link (Admin Only)
   const openSourceLink = (link) => {
     if (!isAuthenticated) {
       setShowLoginModal(true);
@@ -200,151 +202,194 @@ export default function App() {
     window.open(url, '_blank');
   };
 
-  // Helper: Download Image Only (Public)
   const downloadImageOnly = (e, imageData, title) => {
     e.stopPropagation();
     const link = document.createElement('a');
     link.href = imageData;
-    link.download = `${title || 'design'}.jpg`;
+    link.download = `${title || 'jersey-design'}.jpg`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
+  // --- Filtering ---
   const filteredDesigns = useMemo(() => {
-    return designs.filter(d => 
-      d.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      d.tag.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [designs, searchQuery]);
+    return designs.filter(d => {
+      const matchesSearch = d.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            d.tag.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesTab = activeTab === 'All' || d.tag === activeTab;
+      return matchesSearch && matchesTab;
+    });
+  }, [designs, searchQuery, activeTab]);
 
-  // Loading View
+  // --- Render Loading ---
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-slate-50">
-        <Loader2 className="w-10 h-10 animate-spin text-teal-600 mb-4" />
-        <p className="text-slate-600 font-medium italic">জার্সি হাব লোড হচ্ছে...</p>
+      <div className="flex flex-col items-center justify-center h-screen bg-slate-50 text-slate-400">
+        <Loader2 className="w-12 h-12 animate-spin text-teal-600 mb-4" />
+        <p className="font-medium animate-pulse">ডিজাইন গ্যালারি লোড হচ্ছে...</p>
       </div>
     );
   }
 
+  // --- Main UI ---
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-50 font-sans selection:bg-teal-100 selection:text-teal-900">
       
-      {/* --- HEADER --- */}
-      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200 shadow-sm px-4 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="bg-teal-600 p-2 rounded-lg text-white">
-              <ImageIcon size={24} />
+      {/* --- Navbar --- */}
+      <nav className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm transition-all">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-20 gap-4">
+            
+            {/* Logo */}
+            <div className="flex-shrink-0 flex items-center gap-3 cursor-pointer" onClick={() => {setSearchQuery(''); setActiveTab('All');}}>
+              <div className="w-10 h-10 bg-gradient-to-br from-teal-500 to-emerald-600 rounded-xl flex items-center justify-center text-white shadow-teal-200 shadow-lg">
+                <Palette size={20} />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">জার্সি হাব</h1>
+                <span className="text-[10px] text-slate-400 font-medium tracking-wider uppercase">ডিজাইন কালেকশন</span>
+              </div>
             </div>
-            <h1 className="text-xl font-bold text-teal-800 hidden md:block">জার্সি ডিজাইন হাব</h1>
+
+            {/* Search Bar (Desktop) */}
+            <div className="hidden md:flex flex-1 max-w-lg relative group">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <Search className="h-5 w-5 text-slate-400 group-focus-within:text-teal-500 transition-colors" />
+              </div>
+              <input
+                type="text"
+                className="block w-full pl-11 pr-4 py-2.5 bg-slate-100 border-transparent rounded-full text-sm focus:bg-white focus:border-teal-500 focus:ring-4 focus:ring-teal-500/10 transition-all duration-300"
+                placeholder="জার্সির নাম বা ধরণ খুঁজুন..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-3">
+              {isAuthenticated ? (
+                <>
+                  <button 
+                    onClick={() => setIsUploadModalOpen(true)}
+                    className="hidden sm:flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-full font-medium text-sm transition-all shadow-lg shadow-slate-200 hover:shadow-xl active:scale-95"
+                  >
+                    <Upload size={16} /> আপলোড
+                  </button>
+                  <button onClick={handleLogout} className="p-2.5 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-full transition-all" title="লগ আউট">
+                    <LogOut size={22} />
+                  </button>
+                </>
+              ) : (
+                <button 
+                  onClick={() => setShowLoginModal(true)}
+                  className="flex items-center gap-2 text-slate-600 hover:text-teal-700 font-medium px-4 py-2 rounded-full hover:bg-teal-50 transition-all"
+                >
+                  <ShieldCheck size={18} /> <span className="hidden sm:inline">অ্যাডমিন</span>
+                </button>
+              )}
+            </div>
           </div>
-          
-          <div className="flex-1 max-w-md relative">
-            <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              placeholder="ডিজাইন খুঁজুন..." 
-              className="w-full pl-10 pr-4 py-2 bg-slate-100 rounded-full border-none focus:ring-2 focus:ring-teal-500 transition-all"
+        </div>
+        
+        {/* Mobile Search & Tags */}
+        <div className="md:hidden px-4 pb-4 border-b border-slate-100 space-y-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <input
+              type="text"
+              className="w-full pl-9 pr-4 py-2 bg-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              placeholder="ডিজাইন খুঁজুন..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-
-          <div className="flex items-center gap-2">
-            {isAuthenticated ? (
-              <>
-                <button 
-                  onClick={() => setIsUploadModalOpen(true)}
-                  className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-full flex items-center gap-2 transition-all shadow-md active:scale-95"
-                >
-                  <Upload size={18} /> <span className="hidden sm:inline">আপলোড</span>
-                </button>
-                <button 
-                  onClick={handleLogout}
-                  className="bg-red-100 text-red-600 p-2 rounded-full hover:bg-red-200 transition-colors"
-                  title="লগ আউট"
-                >
-                  <LogOut size={20} />
-                </button>
-              </>
-            ) : (
-              <button 
-                onClick={() => setShowLoginModal(true)}
-                className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-full flex items-center gap-2 transition-all shadow-md active:scale-95"
-              >
-                <LogIn size={18} /> <span className="hidden sm:inline">লগইন</span>
-              </button>
-            )}
-          </div>
         </div>
-      </header>
+      </nav>
 
-      {/* --- MAIN GRID --- */}
-      <main className="max-w-7xl mx-auto p-4 md:p-8">
+      {/* --- Filter Tabs --- */}
+      <div className="max-w-7xl mx-auto px-4 pt-6 pb-2">
+         <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+            {['All', 'Sublimation', 'Full Sleeve', 'Half Sleeve', 'Collar'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all duration-200 border ${
+                  activeTab === tab 
+                    ? 'bg-teal-600 text-white border-teal-600 shadow-md shadow-teal-200' 
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-teal-300 hover:text-teal-600'
+                }`}
+              >
+                {tab === 'All' ? 'সব দেখুন' : tab}
+              </button>
+            ))}
+         </div>
+      </div>
+
+      {/* --- Main Content (Masonry Layout) --- */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {filteredDesigns.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-2xl border-2 border-dashed border-slate-200">
-            <p className="text-slate-400">কোনো ডিজাইন পাওয়া যায়নি।</p>
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mb-6">
+              <Search className="w-10 h-10 text-slate-300" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-700">কোনো ডিজাইন পাওয়া যায়নি</h3>
+            <p className="text-slate-500 mt-2 max-w-xs mx-auto">আপনার সার্চ বা ফিল্টার পরিবর্তন করে আবার চেষ্টা করুন।</p>
+            <button onClick={() => {setSearchQuery(''); setActiveTab('All');}} className="mt-6 text-teal-600 font-medium hover:underline">সব ডিজাইন দেখুন</button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredDesigns.map(design => (
-              <div key={design.id} className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden group hover:shadow-lg transition-shadow duration-300">
-                
-                {/* Image Section */}
-                <div className="relative aspect-square overflow-hidden cursor-pointer" onClick={() => setSelectedImage(design)}>
-                  <img src={design.imageData} alt={design.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+          /* Masonry Layout Implementation using CSS Columns */
+          <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-6 space-y-6">
+            {filteredDesigns.map((design) => (
+              <div 
+                key={design.id} 
+                className="break-inside-avoid bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden group hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1 transition-all duration-300 cursor-zoom-in"
+                onClick={() => setSelectedImage(design)}
+              >
+                {/* Image Container - NO FIXED HEIGHT/ASPECT */}
+                <div className="relative w-full">
+                  <img 
+                    src={design.imageData} 
+                    alt={design.title} 
+                    className="w-full h-auto block" // h-auto ensures full height is shown
+                    loading="lazy"
+                  />
                   
-                  {/* Overlay for quick actions */}
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-3 transition-opacity">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); setSelectedImage(design); }}
-                      className="bg-white p-2 rounded-full text-slate-900 hover:text-teal-600 transition-colors"
-                      title="ফুল ভিউ"
-                    >
-                      <Maximize2 size={20} />
-                    </button>
-                    {isAuthenticated && (
-                      <button 
-                        onClick={(e) => handleDelete(e, design.id)}
-                        className="bg-red-500 p-2 rounded-full text-white hover:bg-red-600 transition-colors"
-                        title="ডিলিট করুন"
-                      >
-                        <Trash2 size={20} />
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="absolute top-2 right-2">
-                      <span className="text-[10px] bg-white/95 text-teal-700 px-2 py-1 rounded shadow-sm font-bold tracking-wide uppercase">{design.tag}</span>
+                  {/* Hover Overlay */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
+                     <div className="flex justify-between items-end">
+                        <div className="text-white">
+                           <p className="font-bold text-lg leading-tight mb-1">{design.title}</p>
+                           <span className="inline-block px-2 py-0.5 bg-white/20 backdrop-blur-md rounded text-[10px] uppercase tracking-wider font-semibold border border-white/10">
+                              {design.tag}
+                           </span>
+                        </div>
+                        <button className="bg-white text-slate-900 p-2 rounded-full hover:scale-110 transition-transform shadow-lg">
+                           <Maximize2 size={16} />
+                        </button>
+                     </div>
                   </div>
                 </div>
 
-                {/* Info & Buttons Section */}
-                <div className="p-4">
-                  <h3 className="font-bold truncate mb-3 text-slate-700">{design.title}</h3>
-                  
-                  <div className="grid grid-cols-2 gap-2">
-                    {/* Public: Download Image */}
+                {/* Footer Actions */}
+                <div className="p-3 bg-white flex items-center gap-2 border-t border-slate-50">
                     <button 
                       onClick={(e) => downloadImageOnly(e, design.imageData, design.title)}
-                      className="bg-slate-100 text-slate-700 py-2 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors flex items-center justify-center gap-1"
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors"
                     >
-                      <Save size={14} /> ছবি
+                      <Download size={14} /> ছবি
                     </button>
-
-                    {/* Restricted: Download Source */}
                     <button 
-                      onClick={() => openSourceLink(design.sourceLink)}
-                      className={`py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1 text-white
-                        ${isAuthenticated ? 'bg-teal-600 hover:bg-teal-700' : 'bg-slate-800 hover:bg-slate-900'}
+                      onClick={(e) => { e.stopPropagation(); openSourceLink(design.sourceLink); }}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-colors text-white
+                        ${isAuthenticated 
+                          ? 'bg-teal-600 hover:bg-teal-700 shadow-md shadow-teal-200' 
+                          : 'bg-slate-800 hover:bg-slate-900'}
                       `}
                     >
                       {isAuthenticated ? <Unlock size={14} /> : <Lock size={14} />}
-                      {isAuthenticated ? 'AI ফাইল' : 'সোর্স ফাইল'}
+                      {isAuthenticated ? 'AI ফাইল' : 'সোর্স'}
                     </button>
-                  </div>
                 </div>
               </div>
             ))}
@@ -354,138 +399,208 @@ export default function App() {
 
       {/* --- LOGIN MODAL --- */}
       {showLoginModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-           <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm text-center relative">
-            <button onClick={() => setShowLoginModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
-              <X size={20} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowLoginModal(false)} />
+          <div className="relative bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm text-center animate-in zoom-in-95 duration-200">
+            <button onClick={() => setShowLoginModal(false)} className="absolute top-4 right-4 text-slate-300 hover:text-slate-500 transition-colors">
+              <X size={24} />
             </button>
-            <div className="w-14 h-14 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Lock className="text-teal-600" size={24} />
+            
+            <div className="w-16 h-16 bg-teal-50 rounded-2xl flex items-center justify-center mx-auto mb-6 transform rotate-3">
+              <ShieldCheck className="text-teal-600" size={32} />
             </div>
-            <h2 className="text-xl font-bold text-slate-800 mb-2">অ্যাডমিন এক্সেস</h2>
-            <p className="text-slate-500 text-sm mb-6">AI/EPS ফাইল ডাউনলোড করতে পাসওয়ার্ড দিন।</p>
+            
+            <h2 className="text-2xl font-bold text-slate-800 mb-2">অ্যাডমিন ভেরিফিকেশন</h2>
+            <p className="text-slate-500 text-sm mb-8">এডিটিং এবং ডাউনলোডের জন্য পাসওয়ার্ড দিন।</p>
             
             <form onSubmit={handlePasswordSubmit} className="space-y-4">
-              <div>
+              <div className="relative">
                 <input 
                   type="password"
                   autoFocus
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="পাসওয়ার্ড লিখুন..."
-                  className={`w-full p-3 text-center text-lg tracking-widest border rounded-xl focus:ring-2 focus:outline-none ${
-                    passError ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 focus:ring-teal-500'
+                  placeholder="******"
+                  className={`w-full py-4 text-center text-2xl tracking-[0.5em] font-bold border-2 rounded-2xl focus:outline-none transition-all placeholder:text-slate-200 ${
+                    passError 
+                      ? 'border-red-100 bg-red-50 text-red-600 focus:border-red-500' 
+                      : 'border-slate-100 bg-slate-50 text-slate-800 focus:border-teal-500 focus:bg-white'
                   }`}
                 />
-                {passError && <p className="text-red-500 text-xs mt-2 font-medium">ভুল পাসওয়ার্ড!</p>}
               </div>
+              {passError && <p className="text-red-500 text-xs font-bold animate-pulse">ভুল পাসওয়ার্ড! আবার চেষ্টা করুন।</p>}
+              
               <button 
                 type="submit"
-                className="w-full bg-teal-600 text-white py-3 rounded-xl font-bold hover:bg-teal-700 transition-all active:scale-95"
+                className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold hover:bg-slate-800 transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
               >
-                আনলক করুন
+                 <LogIn size={20} /> অ্যাক্সেস নিন
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* --- UPLOAD MODAL (Admin Only) --- */}
+      {/* --- UPLOAD MODAL --- */}
       {isUploadModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-200">
-            <div className="p-6 border-b flex justify-between items-center bg-slate-50">
-              <h2 className="font-bold text-slate-700">নতুন ডিজাইন আপলোড</h2>
-              <X className="cursor-pointer text-slate-400 hover:text-red-500" onClick={() => setIsUploadModalOpen(false)} />
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-teal-400 transition-colors relative bg-slate-50/50">
-                <input type="file" accept="image/*" onChange={handleFileSelect} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
-                {previewUrl ? (
-                  <img src={previewUrl} className="h-40 mx-auto rounded shadow-sm object-contain" alt="Preview" />
-                ) : (
-                  <div className="py-8 text-slate-400 flex flex-col items-center">
-                    <ImageIcon size={32} className="mb-2 opacity-50" />
-                    <span className="text-sm">ডিজাইনের ছবি (JPG/PNG) এখানে দিন</span>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsUploadModalOpen(false)} />
+          <div className="relative bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 flex flex-col md:flex-row max-h-[90vh]">
+            
+            {/* Left/Top: Image Preview */}
+            <div className={`bg-slate-100 p-6 flex items-center justify-center md:w-5/12 border-b md:border-b-0 md:border-r border-slate-200 ${!previewUrl ? 'bg-slate-50' : ''}`}>
+              {previewUrl ? (
+                <img src={previewUrl} className="max-h-64 md:max-h-full max-w-full rounded-lg shadow-md object-contain" alt="Preview" />
+              ) : (
+                <div className="text-center text-slate-400">
+                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+                    <ImageIcon size={32} className="text-slate-300" />
                   </div>
-                )}
-              </div>
-              <input 
-                type="text" placeholder="জার্সির নাম..." 
-                className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 text-sm"
-                value={newDesignTitle} onChange={e => setNewDesignTitle(e.target.value)}
-              />
-              <input 
-                type="text" placeholder="সোর্স ফাইলের লিঙ্ক (Drive/Dropbox)..." 
-                className="w-full p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 text-sm"
-                value={sourceLink} onChange={e => setSourceLink(e.target.value)}
-              />
-              <div className="flex flex-wrap gap-2">
-                {['Sublimation', 'Full Sleeve', 'Collar', 'Half Sleeve'].map(t => (
-                  <button 
-                    key={t} onClick={() => setNewDesignTag(t)}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${newDesignTag === t ? 'bg-teal-600 text-white border-teal-600' : 'bg-white text-slate-500 border-slate-200 hover:border-teal-400'}`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
+                  <p className="text-sm font-medium">প্রথমে ছবি সিলেক্ট করুন</p>
+                </div>
+              )}
             </div>
-            <div className="p-6 bg-slate-50 flex gap-3">
-              <button onClick={() => setIsUploadModalOpen(false)} className="flex-1 py-2.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 font-medium">বাতিল</button>
-              <button 
-                onClick={handleUpload} disabled={uploading || !fileToUpload}
-                className="flex-1 py-2.5 bg-teal-600 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium hover:bg-teal-700 shadow-sm"
-              >
-                {uploading ? <Loader2 className="animate-spin" size={18} /> : 'আপলোড নিশ্চিত করুন'}
-              </button>
+
+            {/* Right/Bottom: Form */}
+            <div className="p-6 md:p-8 flex-1 flex flex-col">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-slate-800">নতুন ডিজাইন</h2>
+                <button onClick={() => setIsUploadModalOpen(false)} className="text-slate-400 hover:text-red-500 transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="space-y-4 flex-1 overflow-y-auto">
+                {/* File Input */}
+                <div className="relative">
+                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">ডিজাইন ফাইল</label>
+                   <input 
+                      type="file" 
+                      accept="image/*" 
+                      onChange={handleFileSelect}
+                      className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer" 
+                   />
+                </div>
+
+                {/* Inputs */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">জার্সির নাম</label>
+                  <input 
+                    type="text" 
+                    placeholder="উদাহরণ: আর্জেন্টিনা হোম জার্সি ২০২৪..." 
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 focus:bg-white focus:border-transparent outline-none transition-all font-medium"
+                    value={newDesignTitle} onChange={e => setNewDesignTitle(e.target.value)}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">ড্রাইভ/বক্স লিঙ্ক</label>
+                  <input 
+                    type="text" 
+                    placeholder="https://drive.google.com/..." 
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 focus:bg-white focus:border-transparent outline-none transition-all font-medium text-sm"
+                    value={sourceLink} onChange={e => setSourceLink(e.target.value)}
+                  />
+                </div>
+
+                {/* Tags */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">ক্যাটাগরি</label>
+                  <div className="flex flex-wrap gap-2">
+                    {['Sublimation', 'Full Sleeve', 'Collar', 'Half Sleeve'].map(t => (
+                      <button 
+                        key={t} 
+                        onClick={() => setNewDesignTag(t)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                          newDesignTag === t 
+                            ? 'bg-teal-600 text-white border-teal-600 shadow-md shadow-teal-100' 
+                            : 'bg-white text-slate-500 border-slate-200 hover:border-teal-400'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8 pt-4 border-t border-slate-100 flex gap-3">
+                <button 
+                  onClick={handleUpload} 
+                  disabled={uploading || !fileToUpload || !newDesignTitle}
+                  className="w-full py-3 bg-slate-900 text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-bold hover:bg-slate-800 transition-all shadow-lg active:scale-95"
+                >
+                  {uploading ? <Loader2 className="animate-spin" size={20} /> : 'আপলোড করুন'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* --- FULL IMAGE PREVIEW --- */}
+      {/* --- FULL SCREEN IMAGE VIEW --- */}
       {selectedImage && (
-        <div className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setSelectedImage(null)}>
-          <button onClick={() => setSelectedImage(null)} className="absolute top-4 right-4 text-white/50 hover:text-white p-2">
-            <X size={32} />
-          </button>
-          
-          <img src={selectedImage.imageData} className="max-w-full max-h-[75vh] rounded-lg shadow-2xl object-contain" alt="Full View" onClick={(e) => e.stopPropagation()} />
-          
-          <div className="mt-6 flex flex-col items-center gap-2" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-white text-xl font-bold">{selectedImage.title}</h2>
-            <div className="flex gap-4 mt-2">
-              {/* Public Image Download */}
-              <button 
-                onClick={(e) => downloadImageOnly(e, selectedImage.imageData, selectedImage.title)}
-                className="bg-white text-slate-900 px-6 py-2.5 rounded-full font-bold hover:bg-slate-200 flex items-center gap-2 transition-colors"
-              >
-                <Save size={18} /> ছবি সেভ করুন
-              </button>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-200">
+           <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-sm" onClick={() => setSelectedImage(null)} />
+           
+           <button onClick={() => setSelectedImage(null)} className="absolute top-6 right-6 z-10 bg-white/10 hover:bg-white/20 text-white p-2 rounded-full transition-colors">
+             <X size={28} />
+           </button>
 
-              {/* Restricted Source Download */}
-              <button 
-                onClick={() => openSourceLink(selectedImage.sourceLink)} 
-                className={`px-6 py-2.5 rounded-full font-bold flex items-center gap-2 transition-colors text-white
-                  ${isAuthenticated ? 'bg-teal-600 hover:bg-teal-500' : 'bg-slate-800 hover:bg-slate-700 border border-slate-700'}
-                `}
-              >
-                {isAuthenticated ? <Unlock size={18} /> : <Lock size={18} />}
-                {isAuthenticated ? 'AI ফাইল ডাউনলোড' : 'সোর্স ফাইল (লক)'}
-              </button>
-            </div>
-            
-            {/* Delete Option for Admin */}
-            {isAuthenticated && (
-              <button 
-                onClick={(e) => { handleDelete(e, selectedImage.id); }} 
-                className="mt-4 text-red-400 hover:text-red-300 text-sm flex items-center gap-1 opacity-80 hover:opacity-100"
-              >
-                <Trash2 size={14} /> ডিজাইন মুছে ফেলুন
-              </button>
-            )}
-          </div>
+           <div className="relative w-full max-w-6xl h-full flex flex-col md:flex-row gap-6 items-center justify-center pointer-events-none">
+              
+              {/* Image Area - Responsive Full View */}
+              <div className="flex-1 w-full h-full flex items-center justify-center pointer-events-auto min-h-0">
+                 <img 
+                    src={selectedImage.imageData} 
+                    className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" 
+                    alt="Full View" 
+                 />
+              </div>
+
+              {/* Sidebar Info Area */}
+              <div className="w-full md:w-80 bg-white rounded-2xl p-6 pointer-events-auto shadow-2xl shrink-0">
+                 <div className="mb-6">
+                    <span className="text-[10px] font-bold tracking-wider uppercase text-teal-600 bg-teal-50 px-2 py-1 rounded mb-2 inline-block">
+                       {selectedImage.tag}
+                    </span>
+                    <h2 className="text-xl font-bold text-slate-800 leading-tight">{selectedImage.title}</h2>
+                    <p className="text-xs text-slate-400 mt-1">আপলোড: {selectedImage.createdAt ? new Date(selectedImage.createdAt.seconds * 1000).toLocaleDateString() : 'N/A'}</p>
+                 </div>
+
+                 <div className="space-y-3">
+                    <button 
+                      onClick={(e) => downloadImageOnly(e, selectedImage.imageData, selectedImage.title)}
+                      className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <Download size={18} /> ছবি ডাউনলোড
+                    </button>
+
+                    <button 
+                      onClick={() => openSourceLink(selectedImage.sourceLink)} 
+                      className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg text-white
+                        ${isAuthenticated 
+                           ? 'bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700' 
+                           : 'bg-slate-800 hover:bg-slate-900'}
+                      `}
+                    >
+                      {isAuthenticated ? <Unlock size={18} /> : <Lock size={18} />}
+                      {isAuthenticated ? 'AI ফাইল ডাউনলোড' : 'সোর্স ফাইল (লক)'}
+                    </button>
+                 </div>
+
+                 {isAuthenticated && (
+                   <div className="mt-8 pt-6 border-t border-slate-100">
+                     <button 
+                        onClick={(e) => { handleDelete(e, selectedImage.id); }} 
+                        className="w-full py-2 text-red-500 hover:bg-red-50 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+                     >
+                        <Trash2 size={16} /> ডিজাইন মুছে ফেলুন
+                     </button>
+                   </div>
+                 )}
+              </div>
+           </div>
         </div>
       )}
     </div>
