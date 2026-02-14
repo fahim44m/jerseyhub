@@ -26,7 +26,8 @@ import {
   Search, X, Image as ImageIcon, Loader2, Trash2, LogOut, 
   ShieldCheck, Palette, AlertCircle, Plus, Unlock, Lock,
   User, Crown, LayoutGrid, Users, BarChart3, Ban, UserCheck,
-  MessageCircle, CheckCircle, Clock, HelpCircle, ChevronDown, ChevronUp
+  MessageCircle, CheckCircle, Clock, HelpCircle, ChevronDown, ChevronUp,
+  ExternalLink, Info
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -65,17 +66,34 @@ const compressImage = (file) => {
   });
 };
 
+// --- Initial Loading Component ---
+const InitialLoader = () => (
+  <div className="fixed inset-0 z-[9999] bg-slate-900 flex flex-col items-center justify-center text-white">
+    <div className="relative">
+      <div className="w-16 h-16 border-4 border-teal-500/30 border-t-teal-500 rounded-full animate-spin"></div>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <Palette size={20} className="text-teal-500" />
+      </div>
+    </div>
+    <h2 className="mt-4 text-xl font-black tracking-widest animate-pulse">JERSEY HUB</h2>
+    <p className="text-xs text-slate-500 font-bold mt-2">Loading Designs...</p>
+  </div>
+);
+
 export default function App() {
   // Auth & User State
   const [user, setUser] = useState(null);
   const [userData, setUserData] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  
+  // App Loading State
+  const [isAppLoading, setIsAppLoading] = useState(true);
 
   // App Data State
   const [designs, setDesigns] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [deleteRequests, setDeleteRequests] = useState([]);
-  const [pendingDesigns, setPendingDesigns] = useState([]); // For Admin Review
+  const [pendingDesigns, setPendingDesigns] = useState([]); 
   const [loadingDesigns, setLoadingDesigns] = useState(true);
   
   // UI State
@@ -87,7 +105,11 @@ export default function App() {
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   const [lowBalanceModalOpen, setLowBalanceModalOpen] = useState(false);
-  const [showUploadHelp, setShowUploadHelp] = useState(false); // Toggle for help text
+  const [showUploadHelp, setShowUploadHelp] = useState(false);
+  const [pointsInfoOpen, setPointsInfoOpen] = useState(false);
+  
+  // State for resuming download after login
+  const [pendingDownload, setPendingDownload] = useState(null);
 
   // Form State
   const [loginCode, setLoginCode] = useState('');
@@ -146,14 +168,28 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Fetch approved designs for everyone
+  // Resume download after login
+  useEffect(() => {
+    if (user && userData && pendingDownload) {
+      // Small delay to ensure UI is ready
+      const timer = setTimeout(() => {
+        processDownload(pendingDownload);
+        setPendingDownload(null);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [user, userData, pendingDownload]);
+
+  // Fetch approved designs
   useEffect(() => {
     const qDesigns = query(collection(db, 'designs'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(qDesigns, (snap) => {
       const allDesigns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // Filter logic: Only show approved designs to public. Admin logic handled separately if needed.
       setDesigns(allDesigns);
       setLoadingDesigns(false);
+      
+      // Stop initial loading after designs are fetched
+      setTimeout(() => setIsAppLoading(false), 1500); 
     });
     return () => unsub();
   }, []);
@@ -167,7 +203,6 @@ export default function App() {
       const unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
         setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
-      // Fetch Pending Designs specifically for Admin
       const qPending = query(collection(db, 'designs'), where('status', '==', 'pending'));
       const unsubPending = onSnapshot(qPending, (snap) => {
          setPendingDesigns(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -183,7 +218,7 @@ export default function App() {
       setSourceLink('');
       setPreviewUrl(null);
       setFileToUpload(null);
-      setShowUploadHelp(false); // Reset help toggle
+      setShowUploadHelp(false);
     }
   }, [uploadModalOpen]);
 
@@ -249,14 +284,12 @@ export default function App() {
 
   // --- Design Logic ---
 
-  const handleDownloadAttempt = async (design) => {
-    if (!user) { setAuthModalOpen(true); return; }
+  const processDownload = async (design) => {
     if (userData.isBanned) return;
     if (userData.role === 'admin') { window.open(design.sourceLink, '_blank'); return; }
     
-    // Check if points are sufficient
     if (userData.points < 1) { 
-      setLowBalanceModalOpen(true); // Show custom modal
+      setLowBalanceModalOpen(true); 
       return; 
     }
 
@@ -267,6 +300,19 @@ export default function App() {
       await updateDoc(doc(db, 'users', user.uid), { points: increment(-1) });
       window.open(design.sourceLink, '_blank');
     } catch (err) { alert("Error!"); }
+  };
+
+  const handleDownloadAttempt = async (design) => {
+    // If user is not logged in, show login modal AND save pending download
+    if (!user) { 
+        setPendingDownload(design); // Save the design to download after login
+        setAuthMode('user-login'); // Ensure login mode
+        setAuthModalOpen(true); 
+        return; 
+    }
+    
+    // If logged in, proceed directly
+    processDownload(design);
   };
 
   const requestDelete = async (e, design) => {
@@ -295,7 +341,7 @@ export default function App() {
         imageData: base64,
         sourceLink,
         uploadedBy: user.uid,
-        status: 'pending', // NEW: Upload as pending
+        status: 'pending', 
         createdAt: serverTimestamp()
       });
       setUploadModalOpen(false);
@@ -316,15 +362,12 @@ export default function App() {
     await updateDoc(doc(db, 'users', uid), { isBanned: !currentStatus });
   };
 
-  // Admin Actions for Pending Designs
   const handleApproveDesign = async (design) => {
     const confirm = window.confirm("Approve this design? User will get 0.5 points.");
     if(!confirm) return;
 
     try {
-      // 1. Update Design Status
       await updateDoc(doc(db, 'designs', design.id), { status: 'approved' });
-      // 2. Give Points to Uploader
       if (design.uploadedBy) {
          await updateDoc(doc(db, 'users', design.uploadedBy), { points: increment(0.5) });
       }
@@ -340,23 +383,30 @@ export default function App() {
     await deleteDoc(doc(db, 'designs', design.id));
   };
 
-  // Filter approved designs for display
   const filteredDesigns = useMemo(() => {
     return designs.filter(d => 
-      (d.status === 'approved' || !d.status) && // Show approved or legacy (no status) designs
+      (d.status === 'approved' || !d.status) && 
       (activeTab === 'All' || d.tag === activeTab) && 
       d.title.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [designs, activeTab, searchQuery]);
 
+  const totalApprovedDesigns = useMemo(() => {
+    return designs.filter(d => d.status === 'approved' || !d.status).length;
+  }, [designs]);
+
   // --- Main Render ---
+
+  if (isAppLoading) {
+    return <InitialLoader />;
+  }
 
   if (adminPanelOpen && userData?.role === 'admin') {
     return (
       <AdminDashboard 
         allUsers={allUsers} 
         deleteRequests={deleteRequests}
-        pendingDesigns={pendingDesigns} // Pass pending list
+        pendingDesigns={pendingDesigns}
         onClose={() => setAdminPanelOpen(false)} 
         onAddPoints={addPoints}
         onToggleBan={toggleBan}
@@ -402,6 +452,12 @@ export default function App() {
               <div className="hidden sm:flex items-center bg-slate-100 rounded-full px-4 py-1.5 gap-2 border border-slate-200">
                 <span className="text-xs font-bold text-slate-500">{userData.name}</span>
                 <span className="text-sm font-black text-teal-600">{userData.points} Pts</span>
+                <button 
+                  onClick={() => setPointsInfoOpen(true)}
+                  className="w-5 h-5 bg-teal-500 hover:bg-teal-600 text-white rounded-full flex items-center justify-center ml-1 transition-all shadow-md"
+                >
+                  <Plus size={12} strokeWidth={4} />
+                </button>
               </div>
               {userData.role === 'admin' && (
                 <button onClick={() => setAdminPanelOpen(true)} className="p-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-all">
@@ -427,6 +483,13 @@ export default function App() {
           <div className="mb-12 bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2.5rem] p-10 text-white relative overflow-hidden shadow-2xl">
             <div className="relative z-10 max-w-xl">
               <h2 className="text-4xl font-black mb-4">প্রিমিয়াম জার্সি ডিজাইন কালেকশন</h2>
+              
+              {/* Dynamic Design Counter */}
+              <div className="inline-flex items-center gap-2 bg-white/10 px-4 py-2 rounded-lg mb-6 backdrop-blur-sm border border-white/5">
+                <LayoutGrid size={16} className="text-teal-400" />
+                <span className="font-bold text-sm">TOTAL DESIGNS: <span className="text-teal-400 font-black text-lg ml-1">{totalApprovedDesigns}</span></span>
+              </div>
+
               <p className="text-slate-400 text-lg mb-8 font-medium">নতুন ইউজারদের জন্য ১০ পয়েন্ট ফ্রী! আর ডিজাইন আপলোড করলে প্রতি ফাইলে ০.৫ পয়েন্ট বোনাস।</p>
               <div className="flex gap-4">
                 <button onClick={() => {setAuthMode('user-signup'); setAuthModalOpen(true);}} className="bg-teal-500 hover:bg-teal-400 text-white px-8 py-3.5 rounded-2xl font-black transition-all active:scale-95">Signup Free</button>
@@ -435,6 +498,16 @@ export default function App() {
             </div>
             <Crown className="absolute -right-10 -bottom-10 text-white/5 w-64 h-64 -rotate-12" />
           </div>
+        )}
+        
+        {/* User is logged in but we still want to show stats */}
+        {user && (
+            <div className="mb-8 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-slate-400 font-bold text-xs uppercase tracking-widest">
+                    <LayoutGrid size={16} />
+                    <span>Total Designs: <span className="text-slate-900">{totalApprovedDesigns}</span></span>
+                </div>
+            </div>
         )}
 
         {/* Filter Tabs */}
@@ -465,6 +538,46 @@ export default function App() {
         </div>
       </main>
 
+      {/* --- POINTS INFO MODAL (POPUP) --- */}
+      {pointsInfoOpen && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+           <div className="bg-white rounded-[2rem] w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 relative">
+              <button onClick={() => setPointsInfoOpen(false)} className="absolute top-4 right-4 p-2 hover:bg-slate-100 rounded-full"><X size={18} /></button>
+              
+              <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center">
+                      <Info size={20} strokeWidth={3} />
+                  </div>
+                  <h3 className="text-lg font-black text-slate-800">পয়েন্ট ইনফরমেশন</h3>
+              </div>
+
+              <div className="space-y-4">
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <p className="text-sm text-slate-600 font-medium leading-relaxed">
+                          <span className="block mb-1 text-teal-600 font-bold">• আপনি যদি ফ্রিতে Pts পেতে চান তাহলে একটি ডিজাইন আপলোড করলে আপনি পাবেন ০.৫ Pts</span>
+                      </p>
+                  </div>
+                  
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <p className="text-sm text-slate-600 font-medium leading-relaxed">
+                          <span className="block mb-1 text-slate-800 font-bold">• আপনার যদি বেশি Pts প্রয়োজন হয় তাহলে এডমিন এর সাথে যোগাযোগ করুন।</span>
+                          <span className="block text-slate-500 text-xs mt-2">এডমিন এর নাম্বারঃ <span className="font-mono font-bold text-slate-900">01874002653</span></span>
+                      </p>
+                  </div>
+
+                  <a 
+                    href={`https://wa.me/${WHATSAPP_NUMBER}`} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="w-full py-3 bg-[#25D366] text-white rounded-xl font-bold uppercase tracking-wide flex justify-center items-center gap-2 shadow-lg shadow-green-100 mt-2"
+                  >
+                    <MessageCircle size={18} /> WhatsApp
+                  </a>
+              </div>
+           </div>
+        </div>
+      )}
+
       {/* --- LOW BALANCE MODAL (WhatsApp) --- */}
       {lowBalanceModalOpen && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
@@ -494,7 +607,8 @@ export default function App() {
 
       {/* --- AUTH MODAL --- */}
       {authModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+        // UPDATE: Changed z-[100] to z-[150] to appear above image modal (z-[110])
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
           <div className="bg-white rounded-[2.5rem] w-full max-w-md p-8 shadow-2xl animate-in zoom-in-95 relative">
             <button onClick={() => setAuthModalOpen(false)} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full"><X size={20} /></button>
             
@@ -762,6 +876,12 @@ function AdminDashboard({ allUsers, deleteRequests, pendingDesigns, onClose, onA
                       <div className="flex-1 space-y-2">
                         <h4 className="text-lg font-black text-slate-900">{design.title}</h4>
                         <span className="inline-block bg-teal-50 text-teal-600 text-[10px] font-black uppercase px-2 py-1 rounded-md">{design.tag}</span>
+                        
+                        {/* New Check Link Button */}
+                        <a href={design.sourceLink} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-blue-500 text-xs font-bold hover:underline">
+                            <ExternalLink size={12}/> Check Link
+                        </a>
+
                         <div className="flex gap-2 mt-4">
                            <button onClick={() => onApproveDesign(design)} className="flex-1 bg-teal-500 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-teal-600 transition-all">Approve (+0.5)</button>
                            <button onClick={() => onRejectDesign(design)} className="px-4 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"><Trash2 size={16}/></button>
