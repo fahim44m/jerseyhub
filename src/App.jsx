@@ -19,12 +19,14 @@ import {
   setDoc,
   updateDoc,
   increment,
-  orderBy
+  orderBy,
+  where
 } from 'firebase/firestore';
 import { 
   Search, X, Image as ImageIcon, Loader2, Trash2, LogOut, 
   ShieldCheck, Palette, AlertCircle, Plus, Unlock, Lock,
-  User, Crown, LayoutGrid, Users, BarChart3, Ban, UserCheck
+  User, Crown, LayoutGrid, Users, BarChart3, Ban, UserCheck,
+  MessageCircle, CheckCircle, Clock, HelpCircle, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -73,6 +75,7 @@ export default function App() {
   const [designs, setDesigns] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [deleteRequests, setDeleteRequests] = useState([]);
+  const [pendingDesigns, setPendingDesigns] = useState([]); // For Admin Review
   const [loadingDesigns, setLoadingDesigns] = useState(true);
   
   // UI State
@@ -83,6 +86,8 @@ export default function App() {
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [lowBalanceModalOpen, setLowBalanceModalOpen] = useState(false);
+  const [showUploadHelp, setShowUploadHelp] = useState(false); // Toggle for help text
 
   // Form State
   const [loginCode, setLoginCode] = useState('');
@@ -107,6 +112,8 @@ export default function App() {
     password: '@Mdfahim44'
   };
 
+  const WHATSAPP_NUMBER = "8801874002653";
+
   // --- Effects ---
 
   useEffect(() => {
@@ -116,7 +123,6 @@ export default function App() {
         const unsubDoc = onSnapshot(userRef, (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
-            // Check if banned
             if (data.isBanned && data.role !== 'admin') {
               signOut(auth);
               setAuthError("আপনার অ্যাকাউন্টটি ব্যান করা হয়েছে!");
@@ -140,15 +146,19 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Fetch approved designs for everyone
   useEffect(() => {
     const qDesigns = query(collection(db, 'designs'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(qDesigns, (snap) => {
-      setDesigns(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const allDesigns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Filter logic: Only show approved designs to public. Admin logic handled separately if needed.
+      setDesigns(allDesigns);
       setLoadingDesigns(false);
     });
     return () => unsub();
   }, []);
 
+  // Admin Data Fetching
   useEffect(() => {
     if (userData?.role === 'admin') {
       const unsubReqs = onSnapshot(collection(db, 'deleteRequests'), (snap) => {
@@ -157,17 +167,23 @@ export default function App() {
       const unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
         setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
-      return () => { unsubReqs(); unsubUsers(); };
+      // Fetch Pending Designs specifically for Admin
+      const qPending = query(collection(db, 'designs'), where('status', '==', 'pending'));
+      const unsubPending = onSnapshot(qPending, (snap) => {
+         setPendingDesigns(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+
+      return () => { unsubReqs(); unsubUsers(); unsubPending(); };
     }
   }, [userData]);
 
-  // Clean upload form when modal closes
   useEffect(() => {
     if (!uploadModalOpen) {
       setNewDesignTitle('');
       setSourceLink('');
       setPreviewUrl(null);
       setFileToUpload(null);
+      setShowUploadHelp(false); // Reset help toggle
     }
   }, [uploadModalOpen]);
 
@@ -237,7 +253,12 @@ export default function App() {
     if (!user) { setAuthModalOpen(true); return; }
     if (userData.isBanned) return;
     if (userData.role === 'admin') { window.open(design.sourceLink, '_blank'); return; }
-    if (userData.points < 1) { alert("পয়েন্ট নেই!"); return; }
+    
+    // Check if points are sufficient
+    if (userData.points < 1) { 
+      setLowBalanceModalOpen(true); // Show custom modal
+      return; 
+    }
 
     const confirm = window.confirm(`১ পয়েন্ট খরচ হবে। রাজি?`);
     if (!confirm) return;
@@ -274,9 +295,11 @@ export default function App() {
         imageData: base64,
         sourceLink,
         uploadedBy: user.uid,
+        status: 'pending', // NEW: Upload as pending
         createdAt: serverTimestamp()
       });
       setUploadModalOpen(false);
+      alert("ডিজাইন আপলোড হয়েছে! এডমিন অ্যাপরুভ করলে এটি পাবলিশ হবে এবং আপনি ০.৫ পয়েন্ট পাবেন।");
     } catch (err) { alert("Upload failed!"); }
     finally { setUploading(false); }
   };
@@ -293,9 +316,37 @@ export default function App() {
     await updateDoc(doc(db, 'users', uid), { isBanned: !currentStatus });
   };
 
+  // Admin Actions for Pending Designs
+  const handleApproveDesign = async (design) => {
+    const confirm = window.confirm("Approve this design? User will get 0.5 points.");
+    if(!confirm) return;
+
+    try {
+      // 1. Update Design Status
+      await updateDoc(doc(db, 'designs', design.id), { status: 'approved' });
+      // 2. Give Points to Uploader
+      if (design.uploadedBy) {
+         await updateDoc(doc(db, 'users', design.uploadedBy), { points: increment(0.5) });
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error approving");
+    }
+  };
+
+  const handleRejectDesign = async (design) => {
+    const confirm = window.confirm("Reject and Delete this design?");
+    if(!confirm) return;
+    await deleteDoc(doc(db, 'designs', design.id));
+  };
+
+  // Filter approved designs for display
   const filteredDesigns = useMemo(() => {
-    return designs.filter(d => (activeTab === 'All' || d.tag === activeTab) && 
-      d.title.toLowerCase().includes(searchQuery.toLowerCase()));
+    return designs.filter(d => 
+      (d.status === 'approved' || !d.status) && // Show approved or legacy (no status) designs
+      (activeTab === 'All' || d.tag === activeTab) && 
+      d.title.toLowerCase().includes(searchQuery.toLowerCase())
+    );
   }, [designs, activeTab, searchQuery]);
 
   // --- Main Render ---
@@ -304,7 +355,8 @@ export default function App() {
     return (
       <AdminDashboard 
         allUsers={allUsers} 
-        deleteRequests={deleteRequests} 
+        deleteRequests={deleteRequests}
+        pendingDesigns={pendingDesigns} // Pass pending list
         onClose={() => setAdminPanelOpen(false)} 
         onAddPoints={addPoints}
         onToggleBan={toggleBan}
@@ -315,6 +367,8 @@ export default function App() {
         onRejectDelete={async (req) => {
           await deleteDoc(doc(db, 'deleteRequests', req.id));
         }}
+        onApproveDesign={handleApproveDesign}
+        onRejectDesign={handleRejectDesign}
       />
     );
   }
@@ -373,7 +427,7 @@ export default function App() {
           <div className="mb-12 bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2.5rem] p-10 text-white relative overflow-hidden shadow-2xl">
             <div className="relative z-10 max-w-xl">
               <h2 className="text-4xl font-black mb-4">প্রিমিয়াম জার্সি ডিজাইন কালেকশন</h2>
-              <p className="text-slate-400 text-lg mb-8 font-medium">ডাউনলোড করতে আপনার কোড দিয়ে লগিন করুন। নতুন ইউজারদের জন্য ১০ পয়েন্ট ফ্রী!</p>
+              <p className="text-slate-400 text-lg mb-8 font-medium">নতুন ইউজারদের জন্য ১০ পয়েন্ট ফ্রী! আর ডিজাইন আপলোড করলে প্রতি ফাইলে ০.৫ পয়েন্ট বোনাস।</p>
               <div className="flex gap-4">
                 <button onClick={() => {setAuthMode('user-signup'); setAuthModalOpen(true);}} className="bg-teal-500 hover:bg-teal-400 text-white px-8 py-3.5 rounded-2xl font-black transition-all active:scale-95">Signup Free</button>
                 <button onClick={() => {setAuthMode('admin-login'); setAuthModalOpen(true);}} className="bg-white/10 hover:bg-white/20 px-8 py-3.5 rounded-2xl font-bold transition-all">Admin Access</button>
@@ -410,6 +464,33 @@ export default function App() {
           ))}
         </div>
       </main>
+
+      {/* --- LOW BALANCE MODAL (WhatsApp) --- */}
+      {lowBalanceModalOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-sm p-8 shadow-2xl animate-in zoom-in-95 relative text-center">
+             <button onClick={() => setLowBalanceModalOpen(false)} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full"><X size={20} /></button>
+             
+             <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+               <AlertCircle size={40} />
+             </div>
+             
+             <h2 className="text-2xl font-black text-slate-800 mb-2">পয়েন্ট শেষ!</h2>
+             <p className="text-slate-500 font-medium mb-8">আপনার অ্যাকাউন্টে পর্যাপ্ত পয়েন্ট নেই। পয়েন্ট রিলোড করতে এডমিনের সাথে যোগাযোগ করুন।</p>
+             
+             <a 
+               href={`https://wa.me/${WHATSAPP_NUMBER}`} 
+               target="_blank" 
+               rel="noreferrer"
+               className="w-full py-4 bg-[#25D366] text-white rounded-xl font-black uppercase tracking-widest shadow-lg shadow-green-100 hover:bg-[#20bd5a] transition-all flex justify-center items-center gap-2"
+             >
+               <MessageCircle size={20} /> WhatsApp Admin
+             </a>
+             
+             <p className="text-[10px] text-slate-400 mt-4 font-bold">WhatsApp: {WHATSAPP_NUMBER}</p>
+          </div>
+        </div>
+      )}
 
       {/* --- AUTH MODAL --- */}
       {authModalOpen && (
@@ -459,8 +540,8 @@ export default function App() {
 
       {/* --- UPLOAD MODAL --- */}
       {uploadModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-           <div className="bg-white rounded-[2rem] w-full max-w-2xl p-8 shadow-2xl flex flex-col gap-6 animate-in zoom-in-95">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md overflow-y-auto">
+           <div className="bg-white rounded-[2rem] w-full max-w-2xl p-8 shadow-2xl flex flex-col gap-6 animate-in zoom-in-95 my-10">
               <div className="flex justify-between items-center border-b pb-4">
                 <h2 className="text-xl font-black text-slate-800">Upload New Design</h2>
                 <button onClick={() => setUploadModalOpen(false)}><X size={20}/></button>
@@ -481,12 +562,50 @@ export default function App() {
                   <select className="w-full bg-slate-100 p-3 rounded-xl font-bold text-sm outline-none" value={newDesignTag} onChange={e => setNewDesignTag(e.target.value)}>
                     {['Sublimation', 'Full Sleeve', 'Half Sleeve', 'Collar'].map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
+                  <div className="bg-teal-50 p-3 rounded-xl">
+                    <p className="text-[10px] text-teal-700 font-bold">নোট: এডমিন অ্যাপরুভ করলে ০.৫ পয়েন্ট পাবেন।</p>
+                  </div>
                 </div>
               </div>
 
               <button onClick={handleUpload} disabled={uploading} className="w-full py-4 bg-teal-600 text-white rounded-xl font-black flex justify-center items-center gap-2">
-                {uploading ? <Loader2 className="animate-spin"/> : 'Publish Design'}
+                {uploading ? <Loader2 className="animate-spin"/> : 'Submit for Review'}
               </button>
+
+              {/* Upload Instructions Toggle */}
+              <div className="border-t border-slate-100 pt-2">
+                <button 
+                  onClick={() => setShowUploadHelp(!showUploadHelp)}
+                  className="w-full flex items-center justify-between text-slate-500 hover:text-teal-600 font-bold text-xs bg-slate-50 p-3 rounded-xl transition-all"
+                >
+                  <span className="flex items-center gap-2"><HelpCircle size={16}/> কিভাবে আপলোড করবেন?</span>
+                  {showUploadHelp ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+                </button>
+                
+                {showUploadHelp && (
+                  <div className="mt-3 p-4 bg-slate-50 rounded-2xl text-xs text-slate-600 leading-relaxed space-y-4 animate-in slide-in-from-top-2 border border-slate-200">
+                    <div>
+                      <p className="font-black text-slate-800 mb-2 underline">এখানে ডিজাইন আপলোড করতে হলেঃ</p>
+                      <ul className="list-disc pl-4 space-y-1">
+                        <li>ডিজাইন এর একটা ছবি দিতে হবে।</li>
+                        <li>ডিজাইন টাইটেল হচ্ছে ডিজাইন এর নাম বা কোড দিবেন।</li>
+                      </ul>
+                    </div>
+                    
+                    <div>
+                      <p className="font-black text-teal-700 mb-2 underline">গুগল ড্রাইভ লিংক এর নিয়মঃ</p>
+                      <p className="mb-2">( আপনার গুগল ড্রাইভ খুলুন উপরে বাম পাসে কর্নারে <strong>+NEW</strong> একটা আইকন আছে সেটাতে ক্লিক করে নিউ ফোল্ডার খুলুন ফোল্ডার এ ঢুকে আপনি যে ডিজাইন গুলা ওয়েবসাইটে আপলোড করবেন সেগুলা সে ড্রাইভ ফোল্ডারে ডিজাইন গুলা ড্রাগ এন্ড ড্রপ করে আনবেন পরে ডিজাইন গুলা আপনার ড্রাইভে সেভ হয়ে যাবে।</p>
+                      <p className="mb-2">আপনি যে ফোল্ডার বানিয়েছেন সেটার নামের পাশে ৩ টা ডট আছে সেটাতে ক্লিক করবেন শেয়ার অপশন এ মাউস এর চিহ্ন টি রাখবেন আবার দেখবেন আরেকটা শেয়ার লেখা আসছে সেটাতে ক্লিক করবেন <strong>General access</strong> এটার নিচে <strong>Restricted</strong> লেখাতে ক্লিক করবেন পরে <strong>anyone with link</strong> দিবেন এটা দিলে আপনার ডিজাইন এর লিংক শেয়ার করলে যে কেউ ডাউনলোড করতে পারবে।</p>
+                      <p>পরে আপনি যে ডিজাইন গুলা ফোল্ডারে রাখবেন একটা একটা করে আপলোড করবেন ওয়েবসাইট এ... ডিজাইন এর ৩ ডট এ ক্লিক করলে শেয়ার লেখা সেটাতে ক্লিক করবে বা মাউস পয়েন্টার রাখলেই কপি লিংক লেখা সেটা কপি করে Google drive link er জায়গায় দিয়ে দিবেন আর পরে সাবমিট দিয়ে দিবেন।</p>
+                    </div>
+
+                    <div className="flex items-center gap-2 bg-[#25D366]/10 text-[#075E54] p-3 rounded-xl font-bold border border-[#25D366]/20">
+                      <MessageCircle size={16} />
+                      <span>যদি বুঝতে সমস্যা হয় আমার WhatsApp নাম্বারঃ <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" className="underline hover:text-teal-600">01874002653</a> এই নাম্বারে মেসেজ দিবেন ভিডিও দিয়ে দিব।</span>
+                    </div>
+                  </div>
+                )}
+              </div>
            </div>
         </div>
       )}
@@ -512,7 +631,7 @@ export default function App() {
 }
 
 // --- Admin Dashboard Component ---
-function AdminDashboard({ allUsers, deleteRequests, onClose, onAddPoints, onToggleBan, onApproveDelete, onRejectDelete }) {
+function AdminDashboard({ allUsers, deleteRequests, pendingDesigns, onClose, onAddPoints, onToggleBan, onApproveDelete, onRejectDelete, onApproveDesign, onRejectDesign }) {
   const [activeAdminTab, setActiveAdminTab] = useState('users');
 
   return (
@@ -538,6 +657,12 @@ function AdminDashboard({ allUsers, deleteRequests, onClose, onAddPoints, onTogg
           <button onClick={() => setActiveAdminTab('users')} className={`flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-sm transition-all ${activeAdminTab === 'users' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
             <Users size={20} /> Users & Bans
           </button>
+          
+          <button onClick={() => setActiveAdminTab('approvals')} className={`flex items-center justify-between gap-4 px-6 py-4 rounded-2xl font-black text-sm transition-all ${activeAdminTab === 'approvals' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
+            <div className="flex items-center gap-4"><CheckCircle size={20} /> Design Reviews</div>
+            {pendingDesigns.length > 0 && <span className="bg-teal-500 text-white px-2.5 py-1 rounded-lg text-[10px] animate-pulse">{pendingDesigns.length}</span>}
+          </button>
+
           <button onClick={() => setActiveAdminTab('requests')} className={`flex items-center justify-between gap-4 px-6 py-4 rounded-2xl font-black text-sm transition-all ${activeAdminTab === 'requests' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}>
             <div className="flex items-center gap-4"><Trash2 size={20} /> Delete Requests</div>
             {deleteRequests.length > 0 && <span className="bg-red-500 text-white px-2.5 py-1 rounded-lg text-[10px] animate-pulse">{deleteRequests.length}</span>}
@@ -555,12 +680,13 @@ function AdminDashboard({ allUsers, deleteRequests, onClose, onAddPoints, onTogg
 
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto p-10 bg-slate-50/50">
-          {activeAdminTab === 'users' ? (
+          
+          {/* USER MANAGEMENT TAB */}
+          {activeAdminTab === 'users' && (
             <div className="space-y-8">
               <div className="flex justify-between items-end">
                 <h3 className="text-3xl font-black text-slate-900">User Management</h3>
               </div>
-              
               <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
                 <table className="w-full text-left">
                   <thead className="bg-slate-50/50 border-b border-slate-100">
@@ -615,15 +741,49 @@ function AdminDashboard({ allUsers, deleteRequests, onClose, onAddPoints, onTogg
                 </table>
               </div>
             </div>
-          ) : (
+          )}
+
+          {/* APPROVALS TAB */}
+          {activeAdminTab === 'approvals' && (
             <div className="space-y-8">
-               <h3 className="text-3xl font-black text-slate-900">Pending Requests</h3>
+              <h3 className="text-3xl font-black text-slate-900">Pending Designs</h3>
+              {pendingDesigns.length === 0 ? (
+                 <div className="bg-white p-20 rounded-[3rem] text-center border-2 border-dashed border-slate-200">
+                   <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                     <CheckCircle2 size={40} className="text-slate-200" />
+                   </div>
+                   <p className="text-slate-400 font-black text-lg">No designs waiting for approval.</p>
+                 </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {pendingDesigns.map(design => (
+                    <div key={design.id} className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm flex gap-6 hover:shadow-xl transition-all items-center">
+                      <img src={design.imageData} className="w-32 h-32 rounded-2xl object-cover bg-slate-100" />
+                      <div className="flex-1 space-y-2">
+                        <h4 className="text-lg font-black text-slate-900">{design.title}</h4>
+                        <span className="inline-block bg-teal-50 text-teal-600 text-[10px] font-black uppercase px-2 py-1 rounded-md">{design.tag}</span>
+                        <div className="flex gap-2 mt-4">
+                           <button onClick={() => onApproveDesign(design)} className="flex-1 bg-teal-500 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-teal-600 transition-all">Approve (+0.5)</button>
+                           <button onClick={() => onRejectDesign(design)} className="px-4 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"><Trash2 size={16}/></button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DELETE REQUESTS TAB */}
+          {activeAdminTab === 'requests' && (
+            <div className="space-y-8">
+               <h3 className="text-3xl font-black text-slate-900">Delete Requests</h3>
                {deleteRequests.length === 0 ? (
                  <div className="bg-white p-20 rounded-[3rem] text-center border-2 border-dashed border-slate-200">
                    <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto mb-6">
                      <CheckCircle2 size={40} className="text-slate-200" />
                    </div>
-                   <p className="text-slate-400 font-black text-lg">No pending delete requests at the moment.</p>
+                   <p className="text-slate-400 font-black text-lg">No pending delete requests.</p>
                  </div>
                ) : (
                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
