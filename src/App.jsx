@@ -27,7 +27,7 @@ import {
   ShieldCheck, Palette, AlertCircle, Plus, Unlock, Lock,
   User, Crown, LayoutGrid, Users, BarChart3, Ban, UserCheck,
   MessageCircle, CheckCircle, Clock, HelpCircle, ChevronDown, ChevronUp,
-  ExternalLink, Info
+  ExternalLink, Info, Phone
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -64,6 +64,30 @@ const compressImage = (file) => {
       };
     };
   });
+};
+
+// Check if a Google Drive link seems public
+const isLinkPublic = (url) => {
+  if (!url) return false;
+  const lowerUrl = url.toLowerCase();
+  
+  // Must be a google drive link
+  if (!lowerUrl.includes('drive.google.com')) return false;
+
+  // Check for common sharing indicators
+  // 1. "usp=sharing" or "usp=drive_link" usually indicates a shared link
+  // 2. "/folders/" usually works if permissions are set
+  // 3. "/file/d/..." is standard, but we really want to ensure they copied the share link
+  
+  // Strict check: It should ideally have 'usp=' or be a folder link to be considered explicitly shared by user
+  // However, simple /file/d/ links can be public too. 
+  // We will fail if it looks like a root drive link e.g. "drive.google.com/drive/my-drive"
+  
+  if (lowerUrl.includes('drive.google.com/drive/my-drive') || lowerUrl.includes('drive.google.com/drive/u/0')) {
+    return false; // This is a private "My Drive" link
+  }
+
+  return true;
 };
 
 // --- Initial Loading Component ---
@@ -107,14 +131,22 @@ export default function App() {
   const [lowBalanceModalOpen, setLowBalanceModalOpen] = useState(false);
   const [showUploadHelp, setShowUploadHelp] = useState(false);
   const [pointsInfoOpen, setPointsInfoOpen] = useState(false);
+  const [missingInfoModalOpen, setMissingInfoModalOpen] = useState(false); // New Modal for old users
   
   // State for resuming download after login
   const [pendingDownload, setPendingDownload] = useState(null);
 
   // Form State
   const [loginCode, setLoginCode] = useState('');
+  
+  // Signup States
   const [signupName, setSignupName] = useState('');
   const [signupCode, setSignupCode] = useState('');
+  const [signupWhatsapp, setSignupWhatsapp] = useState(''); // New Field
+
+  // Update Info State
+  const [updateWhatsapp, setUpdateWhatsapp] = useState('');
+
   const [adminUser, setAdminUser] = useState('');
   const [adminPass, setAdminPass] = useState('');
   const [authError, setAuthError] = useState('');
@@ -127,6 +159,7 @@ export default function App() {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [fileToUpload, setFileToUpload] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [linkError, setLinkError] = useState(''); // State for Link Validation Error
   const fileInputRef = useRef(null);
 
   const FAHIM_ADMIN = {
@@ -154,6 +187,13 @@ export default function App() {
             } else {
               setUserData(data);
               setUser(currentUser);
+              
+              // Check if WhatsApp is missing for non-admin users
+              if (data.role !== 'admin' && (!data.whatsapp || data.whatsapp === '')) {
+                setMissingInfoModalOpen(true);
+              } else {
+                setMissingInfoModalOpen(false);
+              }
             }
           }
         });
@@ -219,6 +259,7 @@ export default function App() {
       setPreviewUrl(null);
       setFileToUpload(null);
       setShowUploadHelp(false);
+      setLinkError('');
     }
   }, [uploadModalOpen]);
 
@@ -250,10 +291,14 @@ export default function App() {
         }
       } else if (authMode === 'user-signup') {
         if (signupCode.length < 6) throw new Error("কোড কমপক্ষে ৬ সংখ্যার হতে হবে");
+        if (!signupWhatsapp || signupWhatsapp.length < 11) throw new Error("সঠিক WhatsApp নাম্বার দিন");
+        
         const email = signupCode + "@user.local";
         const cred = await createUserWithEmailAndPassword(auth, email, signupCode);
+        
         await setDoc(doc(db, 'users', cred.user.uid), {
           name: signupName,
+          whatsapp: signupWhatsapp, // Saving WA Number
           uid: cred.user.uid,
           points: 10,
           role: 'user',
@@ -274,12 +319,29 @@ export default function App() {
   };
 
   const clearForms = () => {
-    setLoginCode(''); setSignupCode(''); setSignupName(''); setAdminUser(''); setAdminPass('');
+    setLoginCode(''); setSignupCode(''); setSignupName(''); setAdminUser(''); setAdminPass(''); setSignupWhatsapp('');
   };
 
   const handleLogout = async () => {
     await signOut(auth);
     setAdminPanelOpen(false);
+  };
+
+  // Handle Missing WhatsApp Update
+  const handleUpdateWhatsapp = async () => {
+    if(!updateWhatsapp || updateWhatsapp.length < 11) {
+      alert("Please enter a valid WhatsApp number (minimum 11 digits)");
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        whatsapp: updateWhatsapp
+      });
+      setMissingInfoModalOpen(false);
+      alert("Thank you! Your information has been updated.");
+    } catch (e) {
+      alert("Update failed. Please try again.");
+    }
   };
 
   // --- Design Logic ---
@@ -331,7 +393,15 @@ export default function App() {
   };
 
   const handleUpload = async () => {
+    setLinkError('');
     if (!fileToUpload || !newDesignTitle || !sourceLink) return;
+
+    // 1. Link Validation Check
+    if (!isLinkPublic(sourceLink)) {
+      setLinkError("LINK NOT PUBLIC! দয়া করে লিংকটি চেক করুন এবং নিশ্চিত হোন 'Anyone with the link' দেওয়া আছে।");
+      return;
+    }
+
     setUploading(true);
     try {
       const base64 = await compressImage(fileToUpload);
@@ -341,6 +411,8 @@ export default function App() {
         imageData: base64,
         sourceLink,
         uploadedBy: user.uid,
+        uploaderName: userData.name || 'Unknown', // Storing name
+        uploaderWhatsapp: userData.whatsapp || 'N/A', // Storing Whatsapp
         status: 'pending', 
         createdAt: serverTimestamp()
       });
@@ -605,9 +677,39 @@ export default function App() {
         </div>
       )}
 
+      {/* --- MISSING INFO MODAL (For Old Users) --- */}
+      {missingInfoModalOpen && (
+        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
+          <div className="bg-white rounded-[2rem] w-full max-w-sm p-8 shadow-2xl animate-in zoom-in-95 relative text-center">
+             <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+               <UserCheck size={32} />
+             </div>
+             
+             <h2 className="text-xl font-black text-slate-800 mb-2">প্রোফাইল আপডেট করুন</h2>
+             <p className="text-slate-500 text-xs font-bold mb-6">জরুরি প্রয়োজনে এডমিন যোগাযোগের জন্য দয়া করে আপনার WhatsApp নাম্বারটি যুক্ত করুন। আপনার অ্যাকাউন্ট সুরক্ষিত থাকবে।</p>
+             
+             <div className="space-y-4">
+                <input 
+                  type="text" 
+                  placeholder="WhatsApp Number (e.g. 017...)" 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-center tracking-widest"
+                  value={updateWhatsapp}
+                  onChange={e => setUpdateWhatsapp(e.target.value)}
+                />
+                
+                <button 
+                  onClick={handleUpdateWhatsapp}
+                  className="w-full py-3.5 bg-slate-900 text-white rounded-xl font-black uppercase tracking-widest shadow-lg hover:bg-slate-800 transition-all"
+                >
+                  Save Number
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
+
       {/* --- AUTH MODAL --- */}
       {authModalOpen && (
-        // UPDATE: Changed z-[100] to z-[150] to appear above image modal (z-[110])
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
           <div className="bg-white rounded-[2.5rem] w-full max-w-md p-8 shadow-2xl animate-in zoom-in-95 relative">
             <button onClick={() => setAuthModalOpen(false)} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full"><X size={20} /></button>
@@ -636,6 +738,7 @@ export default function App() {
               ) : authMode === 'user-signup' ? (
                 <>
                   <input type="text" placeholder="Your Name" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold" value={signupName} onChange={e => setSignupName(e.target.value)} />
+                  <input type="text" placeholder="WhatsApp Number (11 digits)" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold" value={signupWhatsapp} onChange={e => setSignupWhatsapp(e.target.value)} />
                   <input type="password" placeholder="Set 6-Digit Code" required className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-center tracking-widest" value={signupCode} onChange={e => setSignupCode(e.target.value)} />
                 </>
               ) : (
@@ -679,6 +782,12 @@ export default function App() {
                   <div className="bg-teal-50 p-3 rounded-xl">
                     <p className="text-[10px] text-teal-700 font-bold">নোট: এডমিন অ্যাপরুভ করলে ০.৫ পয়েন্ট পাবেন।</p>
                   </div>
+                  {/* Link Error Message */}
+                  {linkError && (
+                    <div className="bg-red-50 p-3 rounded-xl flex items-center gap-2 text-red-600 font-bold text-xs animate-pulse">
+                      <AlertCircle size={16} /> {linkError}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -821,7 +930,14 @@ function AdminDashboard({ allUsers, deleteRequests, pendingDesigns, onClose, onA
                              </div>
                              <div>
                                <p className="font-black text-slate-800">{u.name}</p>
-                               <p className="text-[10px] text-slate-400 font-bold uppercase">{u.role}</p>
+                               <div className="flex items-center gap-2">
+                                  <p className="text-[10px] text-slate-400 font-bold uppercase">{u.role}</p>
+                                  {u.whatsapp && (
+                                    <span className="flex items-center gap-1 text-[10px] bg-green-50 text-green-600 px-1.5 rounded font-bold">
+                                      <Phone size={8}/> {u.whatsapp}
+                                    </span>
+                                  )}
+                               </div>
                              </div>
                            </div>
                         </td>
@@ -877,8 +993,20 @@ function AdminDashboard({ allUsers, deleteRequests, pendingDesigns, onClose, onA
                         <h4 className="text-lg font-black text-slate-900">{design.title}</h4>
                         <span className="inline-block bg-teal-50 text-teal-600 text-[10px] font-black uppercase px-2 py-1 rounded-md">{design.tag}</span>
                         
+                        {/* New Uploader Info Block */}
+                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
+                          <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Uploaded By</p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-black text-slate-800">{design.uploaderName || 'Unknown'}</span>
+                          </div>
+                          <div className="flex items-center gap-1 mt-1 text-teal-600">
+                             <Phone size={10} />
+                             <span className="text-[10px] font-bold">{design.uploaderWhatsapp || 'N/A'}</span>
+                          </div>
+                        </div>
+
                         {/* New Check Link Button */}
-                        <a href={design.sourceLink} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-blue-500 text-xs font-bold hover:underline">
+                        <a href={design.sourceLink} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-blue-500 text-xs font-bold hover:underline mt-2">
                             <ExternalLink size={12}/> Check Link
                         </a>
 
