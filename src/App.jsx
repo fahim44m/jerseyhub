@@ -926,10 +926,10 @@ function AdminDashboard({ allUsers, deleteRequests, pendingDesigns, onClose, onA
                         <td className="px-8 py-6">
                            <div className="flex items-center gap-3">
                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black ${u.isBanned ? 'bg-red-100 text-red-600' : 'bg-teal-100 text-teal-600'}`}>
-                               {u.name.charAt(0)}
+                              {u?.name ? u.name.charAt(0) : "?"}
                              </div>
                              <div>
-                               <p className="font-black text-slate-800">{u.name}</p>
+                               <p className="font-black text-slate-800">{u?.name || "Unknown User"}</p>
                                <div className="flex items-center gap-2">
                                   <p className="text-[10px] text-slate-400 font-bold uppercase">{u.role}</p>
                                   {u.whatsapp && (
