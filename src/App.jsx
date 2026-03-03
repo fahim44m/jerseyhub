@@ -27,7 +27,8 @@ import {
   ShieldCheck, Palette, AlertCircle, Plus, Unlock, Lock,
   User, Crown, LayoutGrid, Users, BarChart3, Ban, UserCheck,
   MessageCircle, CheckCircle, Clock, HelpCircle, ChevronDown, ChevronUp,
-  ExternalLink, Info, Phone, MinusCircle, HelpCircle as HelpIcon
+  ExternalLink, Info, Phone, MinusCircle, HelpCircle as HelpIcon,
+  Globe
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -76,7 +77,6 @@ const isLinkPublic = (url) => {
   return true;
 };
 
-// --- Initial Loading Component ---
 const InitialLoader = () => (
   <div className="fixed inset-0 z-[9999] bg-slate-900 flex flex-col items-center justify-center text-white">
     <div className="relative">
@@ -133,6 +133,11 @@ export default function App() {
   const FAHIM_ADMIN = { username: 'fahim4mm', password: '@Mdfahim44' };
   const WHATSAPP_NUMBER = "8801874002653";
 
+  // Auto Count: শুধুমাত্র অ্যাপরুভড ডিজাইন গণনা করার জন্য
+  const approvedDesignsCount = useMemo(() => {
+    return designs.filter(d => d.status === 'approved' || !d.status).length;
+  }, [designs]);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
@@ -167,16 +172,6 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
-
-  useEffect(() => {
-    if (user && userData && pendingDownload) {
-      const timer = setTimeout(() => {
-        processDownload(pendingDownload);
-        setPendingDownload(null);
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [user, userData, pendingDownload]);
 
   useEffect(() => {
     const qDesigns = query(collection(db, 'designs'), orderBy('createdAt', 'desc'));
@@ -217,7 +212,7 @@ export default function App() {
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthError('');
-    setAuthProcessing(true);
+    setAuthProcessing(true); // Animation start
     try {
       if (authMode === 'admin-login') {
         if (adminUser === FAHIM_ADMIN.username && adminPass === FAHIM_ADMIN.password) {
@@ -262,7 +257,7 @@ export default function App() {
     } catch (err) {
       setAuthError(err.message);
     } finally {
-      setAuthProcessing(false);
+      setAuthProcessing(false); // Animation end
     }
   };
 
@@ -453,7 +448,12 @@ export default function App() {
               <h2 className="text-4xl font-black mb-4">প্রিমিয়াম জার্সি ডিজাইন কালেকশন</h2>
               <div className="inline-flex items-center gap-2 bg-white/10 px-4 py-2 rounded-lg mb-6 backdrop-blur-sm border border-white/5">
                 <LayoutGrid size={16} className="text-teal-400" />
-                <span className="font-bold text-sm">TOTAL DESIGNS: <span className="text-teal-400 font-black text-lg ml-1">{designs.length}</span></span>
+                <span className="font-bold text-sm uppercase">
+                  TOTAL DESIGNS: 
+                  <span className="text-teal-400 font-black text-lg ml-1 animate-pulse">
+                    {approvedDesignsCount}
+                  </span>
+                </span>
               </div>
               <p className="text-slate-400 text-lg mb-8 font-medium">নতুন ইউজারদের জন্য ১০ পয়েন্ট ফ্রী! আর ডিজাইন আপলোড করলে প্রতি ফাইলে ০.৫ পয়েন্ট বোনাস।</p>
               <div className="flex gap-4">
@@ -465,12 +465,14 @@ export default function App() {
           </div>
         )}
 
-        <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
+        {/* Categories */}
+        <div className="flex gap-2 mb-8 overflow-x-auto pb-2 scrollbar-hide">
           {['All', 'Sublimation', 'Full Sleeve', 'Half Sleeve', 'Collar'].map(t => (
             <button key={t} onClick={() => setActiveTab(t)} className={`px-5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 border ${activeTab === t ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white text-slate-500 border-slate-200 hover:border-teal-500'}`}>{t}</button>
           ))}
         </div>
 
+        {/* Gallery */}
         <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-6 space-y-6">
           {filteredDesigns.map(design => (
             <div key={design.id} className="break-inside-avoid bg-white rounded-[2rem] border border-slate-200 overflow-hidden group hover:shadow-2xl transition-all cursor-pointer relative" onClick={() => setSelectedImage(design)}>
@@ -489,7 +491,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* Points Info */}
+      {/* Points Info Modal */}
       {pointsInfoOpen && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
            <div className="bg-white rounded-[2rem] w-full max-w-sm p-6 shadow-2xl relative">
@@ -509,46 +511,50 @@ export default function App() {
         </div>
       )}
 
-      {/* Low Balance */}
-      {lowBalanceModalOpen && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-          <div className="bg-white rounded-[2.5rem] w-full max-w-sm p-8 shadow-2xl text-center relative">
-             <button onClick={() => setLowBalanceModalOpen(false)} className="absolute top-6 right-6 p-2"><X size={20}/></button>
-             <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6"><AlertCircle size={40}/></div>
-             <h2 className="text-2xl font-black text-slate-800 mb-2">পয়েন্ট শেষ!</h2>
-             <p className="text-slate-500 mb-8">পয়েন্ট রিলোড করতে এডমিনের সাথে যোগাযোগ করুন।</p>
-             <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" className="w-full py-4 bg-[#25D366] text-white rounded-xl font-black flex justify-center items-center gap-2"><MessageCircle size={20}/> WhatsApp Admin</a>
-          </div>
-        </div>
-      )}
-
-      {/* Auth Modal */}
+      {/* Auth Modal with Spinner Animation */}
       {authModalOpen && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
           <div className="bg-white rounded-[2.5rem] w-full max-w-md p-8 shadow-2xl relative">
-            <button onClick={() => {setAuthModalOpen(false); clearAuthFields();}} className="absolute top-6 right-6 p-2"><X size={20}/></button>
+            <button onClick={() => {setAuthModalOpen(false); clearAuthFields();}} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-900 transition-colors"><X size={20}/></button>
             <h2 className="text-2xl font-black text-slate-800 text-center mb-8">{authMode === 'admin-login' ? 'Admin Login' : 'Auth'}</h2>
             <div className="flex p-1 bg-slate-100 rounded-xl mb-6">
-              <button onClick={() => {setAuthMode('user-login'); clearAuthFields();}} className={`flex-1 py-2 rounded-lg text-xs font-bold ${authMode === 'user-login' ? 'bg-white shadow' : 'text-slate-400'}`}>Login</button>
-              <button onClick={() => {setAuthMode('user-signup'); clearAuthFields();}} className={`flex-1 py-2 rounded-lg text-xs font-bold ${authMode === 'user-signup' ? 'bg-white shadow' : 'text-slate-400'}`}>Signup</button>
-              <button onClick={() => {setAuthMode('admin-login'); clearAuthFields();}} className={`flex-1 py-2 rounded-lg text-xs font-bold ${authMode === 'admin-login' ? 'bg-white shadow' : 'text-slate-400'}`}>Admin</button>
+              <button onClick={() => {setAuthMode('user-login'); clearAuthFields();}} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${authMode === 'user-login' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>Login</button>
+              <button onClick={() => {setAuthMode('user-signup'); clearAuthFields();}} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${authMode === 'user-signup' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>Signup</button>
+              <button onClick={() => {setAuthMode('admin-login'); clearAuthFields();}} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${authMode === 'admin-login' ? 'bg-white shadow text-slate-900' : 'text-slate-400'}`}>Admin</button>
             </div>
             <form onSubmit={handleAuth} className="space-y-4">
               {authMode === 'admin-login' ? (
-                <><input type="text" placeholder="Username" className="w-full bg-slate-50 p-3 rounded-xl" value={adminUser} onChange={e=>setAdminUser(e.target.value)} /><input type="password" placeholder="Password" className="w-full bg-slate-50 p-3 rounded-xl" value={adminPass} onChange={e=>setAdminPass(e.target.value)} /></>
+                <>
+                  <input type="text" placeholder="Username" className="w-full bg-slate-50 p-3 rounded-xl border border-transparent focus:border-teal-500 outline-none transition-all" value={adminUser} onChange={e=>setAdminUser(e.target.value)} />
+                  <input type="password" placeholder="Password" className="w-full bg-slate-50 p-3 rounded-xl border border-transparent focus:border-teal-500 outline-none transition-all" value={adminPass} onChange={e=>setAdminPass(e.target.value)} />
+                </>
               ) : authMode === 'user-signup' ? (
-                <><input type="text" placeholder="Name" className="w-full bg-slate-50 p-3 rounded-xl" value={signupName} onChange={e=>setSignupName(e.target.value)} /><input type="text" placeholder="WhatsApp" className="w-full bg-slate-50 p-3 rounded-xl" value={signupWhatsapp} onChange={e=>setSignupWhatsapp(e.target.value)} /><input type="password" placeholder="Code (6 digits)" className="w-full bg-slate-50 p-3 rounded-xl text-center tracking-widest" value={signupCode} onChange={e=>setSignupCode(e.target.value)} /></>
+                <>
+                  <input type="text" placeholder="Name" className="w-full bg-slate-50 p-3 rounded-xl border border-transparent focus:border-teal-500 outline-none transition-all" value={signupName} onChange={e=>setSignupName(e.target.value)} />
+                  <input type="text" placeholder="WhatsApp" className="w-full bg-slate-50 p-3 rounded-xl border border-transparent focus:border-teal-500 outline-none transition-all" value={signupWhatsapp} onChange={e=>setSignupWhatsapp(e.target.value)} />
+                  <input type="password" placeholder="Code (6 digits)" className="w-full bg-slate-50 p-3 rounded-xl text-center tracking-widest border border-transparent focus:border-teal-500 outline-none transition-all" value={signupCode} onChange={e=>setSignupCode(e.target.value)} />
+                </>
               ) : (
-                <input type="password" placeholder="Enter Code" className="w-full bg-slate-50 p-3 rounded-xl text-center tracking-widest" value={loginCode} onChange={e=>setLoginCode(e.target.value)} />
+                <input type="password" placeholder="Enter Code" className="w-full bg-slate-50 p-3 rounded-xl text-center tracking-widest border border-transparent focus:border-teal-500 outline-none transition-all" value={loginCode} onChange={e=>setLoginCode(e.target.value)} />
               )}
-              {authError && <p className="text-red-500 text-xs font-bold">{authError}</p>}
-              <button disabled={authProcessing} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase tracking-widest shadow-lg">Login</button>
+              {authError && <p className="text-red-500 text-xs font-bold bg-red-50 p-2 rounded-lg flex items-center gap-2"><AlertCircle size={14}/> {authError}</p>}
+              
+              <button disabled={authProcessing} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase tracking-widest shadow-lg flex items-center justify-center gap-2 hover:bg-slate-800 transition-all disabled:opacity-70">
+                {authProcessing ? (
+                  <>
+                    <Loader2 className="animate-spin" size={20}/>
+                    Processing...
+                  </>
+                ) : (
+                  authMode === 'user-signup' ? 'Create Account' : 'Login'
+                )}
+              </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* Upload Modal with Instruction Support */}
+      {/* Upload Modal with Help Close Button */}
       {uploadModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md overflow-y-auto">
            <div className="bg-white rounded-[2rem] w-full max-w-4xl p-6 md:p-10 shadow-2xl flex flex-col gap-6 my-10 relative">
@@ -558,14 +564,20 @@ export default function App() {
                 <h2 className="text-2xl font-black text-slate-800">Upload New Design</h2>
                 <button 
                   onClick={() => setShowUploadHelp(!showUploadHelp)} 
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${showUploadHelp ? 'bg-teal-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${showUploadHelp ? 'bg-red-500 text-white shadow-red-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                 >
-                  <HelpIcon size={16}/> {showUploadHelp ? 'Hide Rules' : 'How to Upload?'}
+                  {showUploadHelp ? <X size={16}/> : <HelpIcon size={16}/>} 
+                  {showUploadHelp ? 'Close Rules' : 'How to Upload?'}
                 </button>
               </div>
 
               {showUploadHelp && (
-                <div className="bg-teal-50 border border-teal-100 rounded-3xl p-6 text-sm animate-in fade-in slide-in-from-top-4 duration-300">
+                <div className="bg-teal-50 border border-teal-100 rounded-3xl p-6 text-sm animate-in fade-in slide-in-from-top-4 duration-300 relative">
+                  {/* Close button for help section specifically */}
+                  <button onClick={() => setShowUploadHelp(false)} className="absolute top-4 right-4 p-1.5 bg-red-100 text-red-600 rounded-full hover:bg-red-200 transition-colors">
+                    <X size={14}/>
+                  </button>
+
                   <h3 className="font-black text-teal-800 mb-4 flex items-center gap-2"><Info size={18}/> এখানে ডিজাইন আপলোড করতে হলেঃ</h3>
                   <div className="space-y-4 text-slate-700 leading-relaxed">
                     <p className="flex items-start gap-2"><span className="w-5 h-5 bg-teal-500 text-white rounded-full flex items-center justify-center text-[10px] shrink-0 mt-0.5">১</span> ডিজাইন এর একটা ছবি দিতে হবে।</p>
@@ -666,12 +678,12 @@ export default function App() {
       {/* Full Preview */}
       {selectedImage && (
         <div className="fixed inset-0 z-[110] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-4">
-          <button onClick={() => setSelectedImage(null)} className="absolute top-6 right-6 text-white/50"><X size={32}/></button>
+          <button onClick={() => setSelectedImage(null)} className="absolute top-6 right-6 text-white/50 hover:text-white transition-colors"><X size={32}/></button>
           <div className="max-w-4xl w-full flex flex-col items-center gap-6">
             <img src={selectedImage.imageData} className="max-h-[70vh] rounded-3xl shadow-2xl border border-white/10" />
             <div className="bg-white p-6 rounded-[2rem] w-full max-w-md text-center">
               <h2 className="text-2xl font-black text-slate-800 mb-4">{selectedImage.title}</h2>
-              <button onClick={() => handleDownloadAttempt(selectedImage)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black flex justify-center items-center gap-2"><Unlock size={20}/> Get Source Link</button>
+              <button onClick={() => handleDownloadAttempt(selectedImage)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black flex justify-center items-center gap-2 hover:bg-teal-600 transition-all"><Unlock size={20}/> Get Source Link</button>
             </div>
           </div>
         </div>
@@ -680,11 +692,14 @@ export default function App() {
       {/* Profile Update Modal */}
       {missingInfoModalOpen && (
         <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
-          <div className="bg-white rounded-[2rem] w-full max-w-sm p-8 text-center">
+          <div className="bg-white rounded-[2rem] w-full max-w-sm p-8 text-center shadow-2xl">
+             <div className="w-16 h-16 bg-teal-50 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-4">
+               <UserCheck size={32}/>
+             </div>
              <h2 className="text-xl font-black text-slate-800 mb-2">প্রোফাইল আপডেট করুন</h2>
-             <p className="text-slate-500 text-xs font-bold mb-6">WhatsApp নাম্বারটি যুক্ত করুন।</p>
-             <input type="text" placeholder="WhatsApp Number" className="w-full bg-slate-50 p-3 rounded-xl mb-4 font-bold text-center" value={updateWhatsapp} onChange={e=>setUpdateWhatsapp(e.target.value)} />
-             <button onClick={handleUpdateWhatsapp} className="w-full py-3 bg-slate-900 text-white rounded-xl font-black">Save</button>
+             <p className="text-slate-500 text-xs font-bold mb-6 leading-relaxed">আপনার সঠিক WhatsApp নাম্বারটি যুক্ত করুন। এডমিন আপনার সাথে যোগাযোগ করতে পারবে।</p>
+             <input type="text" placeholder="WhatsApp Number" className="w-full bg-slate-50 p-4 rounded-xl mb-4 font-bold text-center border-2 border-transparent focus:border-teal-500 outline-none transition-all" value={updateWhatsapp} onChange={e=>setUpdateWhatsapp(e.target.value)} />
+             <button onClick={handleUpdateWhatsapp} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black hover:bg-teal-600 transition-all">Save & Continue</button>
           </div>
         </div>
       )}
@@ -697,19 +712,22 @@ function AdminDashboard({ allUsers, deleteRequests, pendingDesigns, onClose, onA
 
   return (
     <div className="fixed inset-0 bg-[#F1F5F9] z-[200] flex flex-col">
-      <header className="h-20 bg-slate-900 text-white px-8 flex items-center justify-between">
-        <div className="flex items-center gap-4"><ShieldCheck size={28}/><h2 className="text-xl font-black tracking-wider uppercase">FAHIM ADMIN</h2></div>
-        <button onClick={onClose} className="bg-white/10 px-6 py-2 rounded-xl font-black text-sm">Exit</button>
+      <header className="h-20 bg-slate-900 text-white px-8 flex items-center justify-between shadow-lg relative z-10">
+        <div className="flex items-center gap-4">
+          <ShieldCheck size={28} className="text-teal-400"/>
+          <h2 className="text-xl font-black tracking-wider uppercase">FAHIM ADMIN</h2>
+        </div>
+        <button onClick={onClose} className="bg-white/10 px-6 py-2 rounded-xl font-black text-sm hover:bg-white/20 transition-all">Exit Dashboard</button>
       </header>
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-72 bg-white border-r border-slate-200 p-8 flex flex-col gap-3">
-          <button onClick={() => setActiveAdminTab('users')} className={`flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-sm ${activeAdminTab === 'users' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}><Users size={20}/> Users</button>
-          <button onClick={() => setActiveAdminTab('approvals')} className={`flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-sm ${activeAdminTab === 'approvals' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}><CheckCircle size={20}/> Reviews</button>
-          <button onClick={() => setActiveAdminTab('requests')} className={`flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-sm ${activeAdminTab === 'requests' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}><Trash2 size={20}/> Deletes</button>
+          <button onClick={() => setActiveAdminTab('users')} className={`flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-sm transition-all ${activeAdminTab === 'users' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}><Users size={20}/> Users</button>
+          <button onClick={() => setActiveAdminTab('approvals')} className={`flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-sm transition-all ${activeAdminTab === 'approvals' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}><CheckCircle size={20}/> Reviews</button>
+          <button onClick={() => setActiveAdminTab('requests')} className={`flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-sm transition-all ${activeAdminTab === 'requests' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}><Trash2 size={20}/> Deletes</button>
         </aside>
-        <main className="flex-1 overflow-y-auto p-10">
+        <main className="flex-1 overflow-y-auto p-10 bg-slate-50">
           {activeAdminTab === 'users' && (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <h3 className="text-3xl font-black text-slate-900">User Management</h3>
               <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
                 <table className="w-full text-left">
@@ -722,10 +740,10 @@ function AdminDashboard({ allUsers, deleteRequests, pendingDesigns, onClose, onA
                         <td className="px-8 py-6 font-black text-xl">{u.points}</td>
                         <td className="px-8 py-6 text-right">
                           <div className="flex flex-col gap-1 items-end">
-                            <button onClick={() => onAddPoints(u.id)} className="bg-teal-600 text-white px-4 py-1.5 rounded-lg text-[10px] font-black uppercase hover:bg-teal-700 w-24">Recharge</button>
-                            <button onClick={() => onSubtractPoints(u.id)} className="bg-red-500 text-white px-4 py-1.5 rounded-lg text-[10px] font-black uppercase hover:bg-red-600 w-24">Minus</button>
+                            <button onClick={() => onAddPoints(u.id)} className="bg-teal-600 text-white px-4 py-1.5 rounded-lg text-[10px] font-black uppercase hover:bg-teal-700 w-24 transition-all">Recharge</button>
+                            <button onClick={() => onSubtractPoints(u.id)} className="bg-red-500 text-white px-4 py-1.5 rounded-lg text-[10px] font-black uppercase hover:bg-red-600 w-24 transition-all">Minus</button>
                             {u.role !== 'admin' && (
-                              <button onClick={() => onToggleBan(u.id, u.isBanned)} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase w-24 ${u.isBanned ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{u.isBanned ? 'Unban' : 'Ban'}</button>
+                              <button onClick={() => onToggleBan(u.id, u.isBanned)} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase w-24 transition-all ${u.isBanned ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{u.isBanned ? 'Unban' : 'Ban'}</button>
                             )}
                           </div>
                         </td>
@@ -737,40 +755,66 @@ function AdminDashboard({ allUsers, deleteRequests, pendingDesigns, onClose, onA
             </div>
           )}
           {activeAdminTab === 'approvals' && (
-            <div className="space-y-6">
-              <h3 className="text-3xl font-black text-slate-900">Pending Approvals</h3>
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <h3 className="text-3xl font-black text-slate-900">Pending Reviews</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {pendingDesigns.map(d => (
-                   <div key={d.id} className="bg-white p-6 rounded-[2.5rem] flex gap-4 border border-slate-200">
-                     <img src={d.imageData} className="w-24 h-24 rounded-2xl object-cover bg-slate-50" />
+                   <div key={d.id} className="bg-white p-6 rounded-[2.5rem] flex gap-4 border border-slate-200 shadow-sm relative group overflow-hidden">
+                     <div className="absolute top-0 right-0 w-12 h-12 bg-slate-900 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Clock size={18}/>
+                     </div>
+                     <img src={d.imageData} className="w-24 h-24 rounded-2xl object-cover bg-slate-50 border border-slate-100" />
                      <div className="flex-1">
                        <h4 className="font-black text-slate-900">{d.title}</h4>
                        <p className="text-[10px] font-bold text-slate-400">By: {d.uploaderName}</p>
+                       
+                       <div className="mt-3">
+                          <button 
+                            onClick={() => window.open(d.sourceLink, '_blank')} 
+                            className="inline-flex items-center gap-1.5 text-[11px] font-black text-teal-600 bg-teal-50 px-3 py-1.5 rounded-lg border border-teal-100 hover:bg-teal-100 transition-all"
+                          >
+                            <Globe size={14}/> View Drive Link
+                          </button>
+                       </div>
+
                        <div className="flex gap-2 mt-4">
-                         <button onClick={() => onApproveDesign(d)} className="flex-1 bg-teal-600 text-white py-2 rounded-xl text-[10px] font-black uppercase">Approve</button>
-                         <button onClick={() => onRejectDesign(d)} className="px-4 bg-red-50 text-red-500 rounded-xl"><Trash2 size={16}/></button>
+                         <button onClick={() => onApproveDesign(d)} className="flex-1 bg-slate-900 text-white py-2 rounded-xl text-[10px] font-black uppercase hover:bg-teal-600 transition-all">Approve</button>
+                         <button onClick={() => onRejectDesign(d)} className="px-4 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-colors"><Trash2 size={16}/></button>
                        </div>
                      </div>
                    </div>
                 ))}
               </div>
+              {pendingDesigns.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[2.5rem] border-2 border-dashed border-slate-200">
+                  <Clock className="text-slate-300 mb-4" size={48}/>
+                  <p className="font-bold text-slate-400 uppercase tracking-widest text-xs">No pending designs to review</p>
+                </div>
+              )}
             </div>
           )}
           {activeAdminTab === 'requests' && (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                <h3 className="text-3xl font-black text-slate-900">Delete Requests</h3>
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                  {deleteRequests.map(r => (
-                   <div key={r.id} className="bg-white p-6 rounded-[2.5rem] border border-slate-200">
+                   <div key={r.id} className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
                      <h4 className="font-black text-slate-900">{r.designTitle}</h4>
                      <p className="text-sm text-slate-500 mt-2 font-medium">"{r.reason}"</p>
+                     <p className="text-[10px] text-slate-400 mt-2 font-bold uppercase">Requested By: {r.requestedBy}</p>
                      <div className="flex gap-2 mt-6">
-                        <button onClick={() => onApproveDelete(r)} className="flex-1 bg-red-500 text-white py-3 rounded-xl font-black text-xs uppercase">Delete</button>
-                        <button onClick={() => onRejectDelete(r)} className="flex-1 bg-slate-100 text-slate-400 py-3 rounded-xl font-black text-xs uppercase">Dismiss</button>
+                        <button onClick={() => onApproveDelete(r)} className="flex-1 bg-red-500 text-white py-3 rounded-xl font-black text-xs uppercase hover:bg-red-600 transition-all">Confirm Delete</button>
+                        <button onClick={() => onRejectDelete(r)} className="flex-1 bg-slate-100 text-slate-400 py-3 rounded-xl font-black text-xs uppercase hover:bg-slate-200 transition-all">Reject Request</button>
                      </div>
                    </div>
                  ))}
                </div>
+               {deleteRequests.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[2.5rem] border-2 border-dashed border-slate-200">
+                  <CheckCircle className="text-slate-300 mb-4" size={48}/>
+                  <p className="font-bold text-slate-400 uppercase tracking-widest text-xs">No pending delete requests</p>
+                </div>
+              )}
             </div>
           )}
         </main>
